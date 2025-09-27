@@ -2,13 +2,13 @@
 // @name         [Eventbrite] Base Price Calculator
 // @namespace    https://github.com/myouisaur/Eventbrite
 // @icon         https://cdn.evbstatic.com/s3-build/prod/2-rc2025-08-21_20.04-py27-7956025/django/images/favicons/favicon.ico
-// @version      1.2
+// @version      2.0
 // @description  Shows the base price (price minus fees) on Eventbrite ticket listings
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
 // @grant        none
-// @updateURL    https://myouisaur.github.io/Eventbrite/show-base-price.user.js
-// @downloadURL  https://myouisaur.github.io/Eventbrite/show-base-price.user.js
+// @updateURL    https://myouisaur.github.io/Work_CN/eventbrite_show-base-price.user.js
+// @downloadURL  https://myouisaur.github.io/Work_CN/eventbrite_show-base-price.user.js
 // ==/UserScript==
 
 (function() {
