@@ -2,7 +2,7 @@
 // @name         [Eventbrite] Set End Date +1 Day
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://cdn.evbstatic.com/s3-build/prod/2-rc2025-08-21_20.04-py27-7956025/django/images/favicons/favicon.ico
-// @version      1.0
+// @version      1.2
 // @description  Adds a button to set Event End date to Event Start + 1 Day
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
@@ -72,8 +72,16 @@
 
             const newDateString = `${newMm}/${newDd}/${newYyyy}`;
 
-            // Set the value using the React-safe helper
+            // 1. Set the value using the React-safe helper
             setNativeValue(endInput, newDateString);
+
+            // 2. FOCUS (Simulate user clicking inside)
+            endInput.focus();
+
+            // 3. BLUR (Simulate user clicking away) - with a tiny delay to ensure validation catches it
+            setTimeout(() => {
+                endInput.blur();
+            }, 100);
 
         } catch (e) {
             console.error(e);
@@ -86,31 +94,26 @@
         if (document.getElementById(BUTTON_ID)) return;
 
         // Locate the "Cancel" button to use as an anchor
-        // We look for the button, then traverse up to its cell wrapper
         const buttons = Array.from(document.querySelectorAll('button'));
         const cancelButton = buttons.find(b => b.textContent.trim() === 'Cancel');
 
         if (cancelButton) {
-            // The structure is Grid -> Cell -> Div -> Button.
-            // We want to add a new Cell before the Cancel Button's Cell.
-            // Closest finds the container cell <div class="eds-g-cell">
+            // Find the container cell <div class="eds-g-cell">
             const cancelCell = cancelButton.closest('.eds-g-cell');
 
             if (cancelCell) {
                 // Create the container cell for our button
                 const newCell = document.createElement('div');
                 newCell.className = 'eds-g-cell';
-                // Add padding to separate it nicely
                 newCell.innerHTML = '<div class="eds-l-pad-right-2"></div>';
 
                 // Create the button
                 const myBtn = document.createElement('button');
                 myBtn.id = BUTTON_ID;
                 myBtn.type = 'button';
-                // Using 'eds-btn--neutral' to match the Cancel button style
                 myBtn.className = 'eds-btn eds-btn--button eds-btn--neutral eds-btn--block';
                 myBtn.innerText = '+1 Day';
-                myBtn.style.border = '1px solid #3d64ff'; // Optional: Blue border to make it stand out slightly
+                myBtn.style.border = '1px solid #3d64ff';
                 myBtn.style.color = '#3d64ff';
 
                 myBtn.addEventListener('click', addOneDay);
@@ -125,7 +128,6 @@
     }
 
     // Use a MutationObserver to handle page loads (SPA behavior)
-    // Eventbrite loads content dynamically, so the inputs aren't there immediately.
     const observer = new MutationObserver((mutations) => {
         if (document.getElementById('copy-startDate') && !document.getElementById(BUTTON_ID)) {
             init();
