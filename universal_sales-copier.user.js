@@ -1,11 +1,15 @@
 // ==UserScript==
 // @name         Universal Event Sales Copier
 // @namespace    https://github.com/myouisaur/Work_CN
-// @version      1.3
+// @version      2.0
 // @description  Adds a "Copy Numbers" button to sites.
 // @author       Xiv
 // @match        https://*.eventbrite.com/*
 // @match        https://*.posh.vip/*
+// @match        https://*.ra.co/*
+// @match        https://*.eventim.us/*
+// @match        https://*.boletosexpress.com/*
+// @match        https://*.tickeri.com/*
 // @grant        GM_addStyle
 // @run-at       document-idle
 // @updateURL    https://myouisaur.github.io/Work_CN/universal_sales-copier.user.js
@@ -22,22 +26,16 @@
         {
             name: 'Eventbrite',
             domain: 'eventbrite.com',
-            // FIX: Uses data-testid (stable) instead of random class names
             check: () => !!document.querySelector('[data-testid="amount-card-title"]'),
             extract: () => {
                 let ticketsSold = '', netSales = '';
-                // Select generic card containers or search by content
-                // We grab parent cards by looking up from the titles to ensure we get the right block
                 const titles = document.querySelectorAll('[data-testid="amount-card-title"]');
 
                 titles.forEach(titleElem => {
                     const titleText = titleElem.innerText.trim();
-                    // Traverse up to the card container (usually 2-3 levels up, but we search siblings)
-                    // Simpler strategy: Look for the value sibling associated with this title
                     const card = titleElem.closest('div[class*="AmountCard"]')?.parentElement || titleElem.parentElement.parentElement;
 
                     if (titleText === "Tickets Sold") {
-                        // Try standard span or specific class structures
                         const valueElem = card.querySelector('[data-testid="amount-card-value"] p') ||
                                           card.querySelector('[data-testid="amount-card-value"]') ||
                                           card.querySelector('span');
@@ -53,15 +51,13 @@
                 });
 
                 if (!netSales) netSales = '$0';
-                if (!ticketsSold && !netSales) throw new Error("Found dashboard but values are empty. Selectors may need update.");
-
+                if (!ticketsSold && !netSales) throw new Error("Found dashboard but values are empty.");
                 return { tickets: ticketsSold, revenue: netSales };
             }
         },
         {
             name: 'Posh.vip',
             domain: 'posh.vip',
-            // Keep using the class if it works, otherwise query generic headers
             check: () => !!document.querySelector('div.CrossSection__w3a2U'),
             extract: () => {
                 let ticketsSold = '', totalRevenue = '';
@@ -79,8 +75,103 @@
 
                 if (ticketsSold && !totalRevenue) totalRevenue = '0';
                 if (!ticketsSold && !totalRevenue) throw new Error("Could not find CrossSection data.");
-
                 return { tickets: ticketsSold, revenue: totalRevenue };
+            }
+        },
+        {
+            name: 'Resident Advisor',
+            domain: 'ra.co',
+            // Checks for the primary color value spans shown in the snippet
+            check: () => !!document.querySelector('span[color="primary"]'),
+            extract: () => {
+                let tickets = '', revenue = '';
+                // The snippet shows values in span[color="primary"] and totals in span[color="#CCCCCC"]
+                const valueSpans = document.querySelectorAll('span[color="primary"]');
+
+                valueSpans.forEach(span => {
+                    const text = span.innerText.trim();
+                    // Identify if this is revenue (has currency symbol) or tickets (number)
+                    // We also check the sibling to ensure it follows the "Value / Total" format
+                    const sibling = span.nextElementSibling;
+                    if (sibling && sibling.innerText.includes('/')) {
+                        if (text.includes('$') || text.includes('£') || text.includes('€')) {
+                            revenue = text;
+                        } else {
+                            tickets = text;
+                        }
+                    }
+                });
+
+                if (!tickets && !revenue) throw new Error("RA elements found but data missing.");
+                return { tickets: tickets || '0', revenue: revenue || '$0' };
+            }
+        },
+        {
+            name: 'Seetickets / Eventim',
+            domain: 'eventim.us',
+            check: () => !!document.querySelector('#table table'),
+            extract: () => {
+                const table = document.querySelector('#table table');
+                // Get the second row (index 1) which contains the data values
+                const dataRow = table.querySelectorAll('tr')[1];
+                if (!dataRow) throw new Error("Table data row not found.");
+
+                const cells = dataRow.querySelectorAll('td');
+                // Column 0 is Tickets, Last Column is Total Sales
+                const tickets = cells[0]?.innerText.trim();
+                const revenue = cells[cells.length - 1]?.innerText.trim();
+
+                return { tickets: tickets || '0', revenue: revenue || '$0' };
+            }
+        },
+        {
+            name: 'Boletos Express',
+            domain: 'boletosexpress.com',
+            check: () => !!document.querySelector('#audit'),
+            extract: () => {
+                let tickets = '';
+                const auditSection = document.getElementById('audit');
+
+                // Find Tickets inside the DL list
+                const dls = auditSection.querySelectorAll('dl');
+                dls.forEach(dl => {
+                    const dt = dl.querySelector('dt');
+                    if (dt && dt.innerText.includes('Tickets Distributed')) {
+                        tickets = dl.querySelector('dd b')?.innerText.trim();
+                    }
+                });
+
+                // Find Revenue by ID
+                const revElem = document.querySelector('#revenue_total b');
+                const revenue = revElem ? revElem.innerText.trim() : '$0.00';
+
+                return { tickets: tickets || '0', revenue: revenue };
+            }
+        },
+        {
+            name: 'Tickeri',
+            domain: 'tickeri.com',
+            check: () => document.body.innerText.includes('Ticket Inventory'),
+            extract: () => {
+                let tickets = '0';
+                let revenue = '$0.00';
+
+                // Helper to find value based on label text in sibling/parent
+                const spans = Array.from(document.querySelectorAll('span'));
+
+                const ticketLabel = spans.find(s => s.innerText.includes('Ticket Inventory'));
+                if (ticketLabel && ticketLabel.nextElementSibling) {
+                    // Format is "4 / 610" -> We want "4"
+                    const rawText = ticketLabel.nextElementSibling.innerText.trim();
+                    tickets = rawText.split('/')[0].trim();
+                }
+
+                const revenueLabel = spans.find(s => s.innerText.includes('Total revenue'));
+                if (revenueLabel && revenueLabel.nextElementSibling) {
+                    revenue = revenueLabel.nextElementSibling.innerText.trim();
+                }
+
+                return { tickets, revenue };
             }
         }
     ];
@@ -205,16 +296,11 @@
     }
 
     function scanPage() {
-        // Optimization: Don't scan if we are not on a supported domain pattern
-        // (The @match header handles this mostly, but good for safety)
-
         const currentUrl = window.location.href;
         let foundModule = null;
 
         for (const mod of siteModules) {
             if (currentUrl.includes(mod.domain)) {
-                // LIGHTWEIGHT CHECK: querySelector stops at the first match.
-                // It does not create a large NodeList like querySelectorAll.
                 if (mod.check()) {
                     foundModule = mod;
                 }
