@@ -1,9 +1,8 @@
 // ==UserScript==
 // @name         Universal Event Sales Copier
 // @namespace    https://github.com/myouisaur/Work_CN
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=eventbrite.com
-// @version      1.0
-// @description  Adds a modular "Copy Numbers" button to Eventbrite, Posh.vip, and etc.
+// @version      1.3
+// @description  Adds a "Copy Numbers" button to sites.
 // @author       Xiv
 // @match        https://*.eventbrite.com/*
 // @match        https://*.posh.vip/*
@@ -17,39 +16,44 @@
     'use strict';
 
     // ============================================================================
-    // 1. SITE CONFIGURATION (MODULAR SECTION)
-    // Add new sites here.
-    // 'check': Returns true if elements exist (controls button visibility).
-    // 'extract': Returns { tickets, revenue } or throws error.
+    // 1. SITE CONFIGURATION
     // ============================================================================
     const siteModules = [
         {
             name: 'Eventbrite',
             domain: 'eventbrite.com',
-            check: () => document.querySelectorAll('.dashboard-amount-card, .AmountCard_dashboardAmountCard__EajNf').length > 0,
+            // FIX: Uses data-testid (stable) instead of random class names
+            check: () => !!document.querySelector('[data-testid="amount-card-title"]'),
             extract: () => {
                 let ticketsSold = '', netSales = '';
-                const cards = document.querySelectorAll('.dashboard-amount-card, .AmountCard_dashboardAmountCard__EajNf');
+                // Select generic card containers or search by content
+                // We grab parent cards by looking up from the titles to ensure we get the right block
+                const titles = document.querySelectorAll('[data-testid="amount-card-title"]');
 
-                cards.forEach(card => {
-                    const title = card.querySelector('[data-testid="amount-card-title"]')?.innerText.trim();
+                titles.forEach(titleElem => {
+                    const titleText = titleElem.innerText.trim();
+                    // Traverse up to the card container (usually 2-3 levels up, but we search siblings)
+                    // Simpler strategy: Look for the value sibling associated with this title
+                    const card = titleElem.closest('div[class*="AmountCard"]')?.parentElement || titleElem.parentElement.parentElement;
 
-                    if (title === "Tickets Sold") {
-                        const spanValue = card.querySelector('span')?.innerText.trim();
-                        // Note: Class names with random hashes (like ___Ji3j) can change, relying on the user's provided logic
-                        const ticketsCountValue = card.querySelector('.TicketsSoldAmountCard_ticketsCount___Ji3j p')?.innerText.trim();
-                        ticketsSold = spanValue || ticketsCountValue || '';
+                    if (titleText === "Tickets Sold") {
+                        // Try standard span or specific class structures
+                        const valueElem = card.querySelector('[data-testid="amount-card-value"] p') ||
+                                          card.querySelector('[data-testid="amount-card-value"]') ||
+                                          card.querySelector('span');
+                        ticketsSold = valueElem ? valueElem.innerText.trim() : '';
                     }
 
-                    if (title === "Net Sales") {
-                        const oldValue = card.querySelector('[data-testid="amount-card-value"]')?.innerText.trim();
-                        const newValue = card.querySelector('.AmountCard_amountText__kae4k[data-testid="amount-card-value"] p')?.innerText.trim();
-                        netSales = oldValue || newValue || '';
+                    if (titleText === "Net Sales") {
+                        const valueElem = card.querySelector('[data-testid="amount-card-value"] p') ||
+                                          card.querySelector('[data-testid="amount-card-value"]') ||
+                                          card.querySelector('span');
+                        netSales = valueElem ? valueElem.innerText.trim() : '';
                     }
                 });
 
                 if (!netSales) netSales = '$0';
-                if (!ticketsSold && !netSales) throw new Error("Could not find Ticket or Sales data.");
+                if (!ticketsSold && !netSales) throw new Error("Found dashboard but values are empty. Selectors may need update.");
 
                 return { tickets: ticketsSold, revenue: netSales };
             }
@@ -57,7 +61,8 @@
         {
             name: 'Posh.vip',
             domain: 'posh.vip',
-            check: () => document.querySelectorAll('div.CrossSection__w3a2U').length > 0,
+            // Keep using the class if it works, otherwise query generic headers
+            check: () => !!document.querySelector('div.CrossSection__w3a2U'),
             extract: () => {
                 let ticketsSold = '', totalRevenue = '';
                 const divs = document.querySelectorAll('div.CrossSection__w3a2U');
@@ -81,20 +86,20 @@
     ];
 
     // ============================================================================
-    // 2. STYLES & UI
+    // 2. STYLES (Z-Index increased to ensure visibility)
     // ============================================================================
     const STYLES = `
         #ues-copy-btn {
             position: fixed;
             top: 20px;
             left: 50%;
-            transform: translateX(-50%) translateY(-100px); /* Start hidden */
-            z-index: 99999;
+            transform: translateX(-50%) translateY(-100px);
+            z-index: 2147483647; /* Max Z-Index */
             background: #2563eb;
             color: white;
             border: none;
             padding: 10px 24px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-weight: 600;
             font-size: 14px;
             border-radius: 50px;
@@ -105,24 +110,19 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            pointer-events: none;
         }
-
         #ues-copy-btn.visible {
             transform: translateX(-50%) translateY(0);
             opacity: 1;
+            pointer-events: auto;
         }
-
         #ues-copy-btn:hover {
             background: #1d4ed8;
-            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
             transform: translateX(-50%) translateY(-2px);
         }
+        #ues-copy-btn:active { transform: translateX(-50%) translateY(1px); }
 
-        #ues-copy-btn:active {
-            transform: translateX(-50%) translateY(1px);
-        }
-
-        /* Notification Toast */
         #ues-toast {
             position: fixed;
             bottom: 30px;
@@ -132,9 +132,9 @@
             color: white;
             padding: 12px 24px;
             border-radius: 8px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: sans-serif;
             font-size: 14px;
-            z-index: 99999;
+            z-index: 2147483647;
             opacity: 0;
             pointer-events: none;
             transition: all 0.3s ease;
@@ -142,51 +142,79 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            min-width: 200px;
-            justify-content: center;
         }
-
-        #ues-toast.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-
-        #ues-toast.error {
-            background: #ef4444;
-        }
-        #ues-toast.success {
-            background: #10b981;
-        }
+        #ues-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        #ues-toast.error { background: #ef4444; }
+        #ues-toast.success { background: #10b981; }
     `;
 
     GM_addStyle(STYLES);
 
     // ============================================================================
-    // 3. CORE LOGIC
+    // 3. CORE LOGIC (Optimized for RAM)
     // ============================================================================
 
     let activeModule = null;
     let button = null;
     let toast = null;
+    let pollInterval = null;
 
     function init() {
-        // Create UI Elements
         createButton();
         createToast();
 
-        // Start Scanner to detect if we are on a supported page/state
-        setInterval(scanPage, 2000);
-        scanPage(); // Run immediately
+        // 1. Check immediately
+        scanPage();
+
+        // 2. Hook into URL changes (SPA Navigation) - Low Cost
+        const pushState = history.pushState;
+        history.pushState = function() {
+            pushState.apply(history, arguments);
+            scanPage();
+        };
+        const replaceState = history.replaceState;
+        history.replaceState = function() {
+            replaceState.apply(history, arguments);
+            scanPage();
+        };
+        window.addEventListener('popstate', scanPage);
+
+        // 3. Start "Smart Polling"
+        startPolling();
+
+        // 4. Stop polling when tab is hidden to save RAM
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopPolling();
+            } else {
+                startPolling();
+                scanPage(); // Check once immediately on wake
+            }
+        });
+    }
+
+    function startPolling() {
+        if (pollInterval) clearInterval(pollInterval);
+        // Check every 3 seconds (Very slow = Low CPU/RAM)
+        pollInterval = setInterval(scanPage, 3000);
+    }
+
+    function stopPolling() {
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = null;
     }
 
     function scanPage() {
+        // Optimization: Don't scan if we are not on a supported domain pattern
+        // (The @match header handles this mostly, but good for safety)
+
         const currentUrl = window.location.href;
         let foundModule = null;
 
-        // Find which module applies to this domain
         for (const mod of siteModules) {
             if (currentUrl.includes(mod.domain)) {
-                // Check if the specific elements exist right now
+                // LIGHTWEIGHT CHECK: querySelector stops at the first match.
+                // It does not create a large NodeList like querySelectorAll.
                 if (mod.check()) {
                     foundModule = mod;
                 }
@@ -194,13 +222,14 @@
             }
         }
 
-        activeModule = foundModule;
-        toggleButton(!!activeModule);
+        if (activeModule !== foundModule) {
+            activeModule = foundModule;
+            toggleButton(!!activeModule);
+        }
     }
 
     function createButton() {
         if (document.getElementById('ues-copy-btn')) return;
-
         button = document.createElement('button');
         button.id = 'ues-copy-btn';
         button.innerHTML = `
@@ -213,7 +242,6 @@
 
     function createToast() {
         if (document.getElementById('ues-toast')) return;
-
         toast = document.createElement('div');
         toast.id = 'ues-toast';
         document.body.appendChild(toast);
@@ -230,42 +258,26 @@
 
     function showToast(message, type = 'success') {
         if (!toast) return;
-
         toast.textContent = message;
-        toast.className = ''; // reset
+        toast.className = '';
         toast.classList.add('show', type);
-
-        // Hide after 3 seconds
-        setTimeout(() => {
-            toast.classList.remove('show');
-        }, 3000);
+        setTimeout(() => toast.classList.remove('show'), 3000);
     }
 
     async function handleCopy() {
         if (!activeModule) return;
-
         try {
-            // 1. Extract Data
             const data = activeModule.extract();
             const url = window.location.href;
-
-            // 2. Format: URL [tab] Tickets [tab] Revenue
             const finalString = `${url}\t${data.tickets}\t${data.revenue}`;
-
-            // 3. Copy to Clipboard
             await navigator.clipboard.writeText(finalString);
-
-            // 4. Notify Success
             showToast(`Copied: ${data.tickets} / ${data.revenue}`, 'success');
-
         } catch (err) {
-            console.error('Extraction Error:', err);
-            // 5. Notify Error
-            showToast(`Error: ${err.message || 'Unknown error'}`, 'error');
+            console.error(err);
+            showToast(`Error: ${err.message}`, 'error');
         }
     }
 
-    // Run the script
     init();
 
 })();
