@@ -2,10 +2,10 @@
 // @name         [Tickeri] Ticket Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://www.tickeri.com/promoter/tickeri-eo-favicon.ico
-// @version      1.2
+// @version      1.3
 // @description  Highlights ticket sold.
 // @author       Xiv
-// @match        *://*.boletosexpress.com/*
+// @match        *://*.tickeri.com/*
 // @grant        none
 // @updateURL    https://myouisaur.github.io/Work_CN/tickeri_highlight-sales.user.js
 // @downloadURL  https://myouisaur.github.io/Work_CN/tickeri_highlight-sales.user.js
