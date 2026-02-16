@@ -2,7 +2,7 @@
 // @name         [RA] Ticket Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://ra.co/static/favicon-32x32.png
-// @version      1.4
+// @version      1.5
 // @description  Highlights rows with ticket sales.
 // @author       Xiv
 // @match        *://*.ra.co/*
@@ -15,7 +15,7 @@
     'use strict';
 
     // CONFIGURATION
-    const COLOR_GOLD = "#ffd700"; // Gold
+    const ROW_CoLOR = "#90e0b4"; // Green
     const ROW_SELECTOR = "li.myEvents"; // The main container for the event line
 
     /**
@@ -44,7 +44,7 @@
 
                     // Logic: Only highlight if count > 0
                     if (!isNaN(count) && count > 0) {
-                        row.style.backgroundColor = COLOR_GOLD;
+                        row.style.backgroundColor = ROW_CoLOR;
                         row.style.transition = "background-color 0.2s ease";
 
                         // Optional: Add padding/radius if the existing layout feels too tight
