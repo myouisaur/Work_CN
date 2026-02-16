@@ -2,10 +2,10 @@
 // @name         [Boletos] Clean for Duplication
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://www.boletosexpress.com/favicon.ico
-// @version      1.2
+// @version      1.3
 // @description  Adds a high-visibility "Clean for duplication" button to the quicklinks bar.
 // @author       Xiv
-// @match        *://*.boletosexpress.com/*
+// @match        *://*.boletosexpress.com/promoters/event-addedit.php?event_id=*
 // @grant        none
 // @updateURL    https://myouisaur.github.io/Work_CN/boletos_clean-for-duplication.user.js
 // @downloadURL  https://myouisaur.github.io/Work_CN/boletos_clean-for-duplication.user.js
