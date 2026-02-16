@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Universal Event Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
-// @version      3.0
+// @version      3.2
 // @description  Adds a "Copy Numbers" button to sites.
 // @author       Xiv
 // @match        https://*.eventbrite.com/*
 // @match        https://*.posh.vip/*
-// @match        https://*.ra.co/*
+// @match        https://*.ra.co/pro/events/*/tickets/management
 // @match        https://*.eventim.us/*
 // @match        https://*.boletosexpress.com/*
 // @match        https://*.tickeri.com/*
@@ -55,7 +55,7 @@
             }
         },
         {
-            name: 'Posh.vip',
+            name: 'Posh',
             domain: 'posh.vip',
             check: () => !!document.querySelector('div.CrossSection__w3a2U'),
             extract: () => {
