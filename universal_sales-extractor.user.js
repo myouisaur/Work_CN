@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         Universal Event Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
-// @version      3.2
+// @version      3.3
 // @description  Adds a "Copy Numbers" button to sites.
 // @author       Xiv
-// @match        https://*.eventbrite.com/*
-// @match        https://*.posh.vip/*
-// @match        https://*.ra.co/pro/events/*/tickets/management
-// @match        https://*.eventim.us/*
-// @match        https://*.boletosexpress.com/*
-// @match        https://*.tickeri.com/*
+// @match        *://*.eventbrite.com/*
+// @match        *://*.posh.vip/*
+// @match        *://*.ra.co/pro/events/*/tickets/management
+// @match        *://*.eventim.us/*
+// @match        *://*.boletosexpress.com/*
+// @match        *://*.tickeri.com/*
 // @grant        GM_addStyle
 // @run-at       document-idle
 // @updateURL    https://myouisaur.github.io/Work_CN/universal_sales-extractor.user.js
