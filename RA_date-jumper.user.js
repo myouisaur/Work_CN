@@ -2,8 +2,8 @@
 // @name         [RA] Date Jumper
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://ra.co/static/favicon-32x32.png
-// @version      3.2
-// @description  Adds a floating button to jump dates within the page.
+// @version      3.4
+// @description  Floating date jumper, auto-opens on desktop, pinned date with optimized scrolling.
 // @author       Xiv
 // @match        *://*.ra.co/pro/events
 // @grant        none
@@ -99,6 +99,27 @@
             background-color: #fff0f0;
             color: #ff4848;
         }
+
+        /* Sticky Header - Adjusted to float below the top nav */
+        #ra-sticky-header {
+            position: fixed;
+            top: 65px; /* Pushed down to avoid site nav */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(30, 30, 30, 0.95);
+            color: white;
+            padding: 6px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            z-index: 2147483647;
+            border-radius: 20px; /* Pill shape */
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            opacity: 0;
+            letter-spacing: 0.5px;
+        }
     `;
 
     // --- Custom Smooth Scroll Engine ---
@@ -111,29 +132,22 @@
             if (!startTime) startTime = timestamp;
             const timeElapsed = timestamp - startTime;
             const progress = Math.min(timeElapsed / duration, 1);
-
-            // Ease Out Quad Formula
-            const ease = 1 - (1 - progress) * (1 - progress);
-
+            const ease = 1 - (1 - progress) * (1 - progress); // Ease Out Quad
             window.scrollTo(0, startY + (diff * ease));
 
             if (timeElapsed < duration) {
                 window.requestAnimationFrame(step);
             }
         }
-
         window.requestAnimationFrame(step);
     }
 
     function triggerScroll(element, iframe) {
         if (!element) return;
-
         const iframeRect = iframe.getBoundingClientRect();
         const elementRect = element.getBoundingClientRect();
-
         const absoluteTop = window.scrollY + iframeRect.top + elementRect.top;
         const targetPosition = absoluteTop - SCROLL_OFFSET;
-
         customScrollTo(targetPosition, SCROLL_DURATION);
     }
 
@@ -156,9 +170,7 @@
                     clearInterval(checkRows);
                     buildUI(headers, iframe);
                 }
-            } catch (e) {
-                // Ignore cross-origin issues
-            }
+            } catch (e) {} // Ignore cross-origin issues
             if (attempts > 20) clearInterval(checkRows);
         }, 500);
     }
@@ -176,13 +188,21 @@
         // FAB Button
         const btn = document.createElement('div');
         btn.className = 'ra-fab-btn';
-        btn.innerHTML = '📅';
-        btn.title = "Jump to Date";
 
         // Menu
         const menu = document.createElement('div');
         menu.className = 'ra-date-menu';
         const ul = document.createElement('ul');
+
+        const isDesktop = window.innerWidth >= 1024;
+        if (isDesktop) {
+            menu.classList.add('open');
+            btn.innerHTML = '✕';
+            btn.title = "Close Date Menu";
+        } else {
+            btn.innerHTML = '📅';
+            btn.title = "Jump to Date";
+        }
 
         headers.forEach((header) => {
             const text = header.innerText.replace(/[\n\r]+/g, ' ').trim();
@@ -196,7 +216,6 @@
             a.addEventListener('click', (e) => {
                 e.preventDefault();
                 triggerScroll(header, iframe);
-                // NOTE: removed the auto-close logic here
             });
 
             li.appendChild(a);
@@ -213,9 +232,9 @@
             e.stopPropagation();
             const isOpen = menu.classList.toggle('open');
             btn.innerHTML = isOpen ? '✕' : '📅';
+            btn.title = isOpen ? "Close Date Menu" : "Jump to Date";
         });
 
-        // Close when clicking outside (still good for UX)
         document.addEventListener('click', (e) => {
             if (!container.contains(e.target)) {
                 menu.classList.remove('open');
@@ -223,10 +242,56 @@
             }
         });
 
-        console.log(`[RA Nav] Loaded ${headers.length} dates.`);
+        // --- Feature 2: Sticky Pinned Header (Highly Optimized) ---
+        const stickyHeader = document.createElement('div');
+        stickyHeader.id = 'ra-sticky-header';
+        document.body.appendChild(stickyHeader);
+
+        const updateStickyHeader = () => {
+            const scrollY = window.scrollY;
+            const threshold = SCROLL_OFFSET + 50;
+            const iframeRectTop = iframe.getBoundingClientRect().top;
+
+            let currentText = '';
+
+            for (let i = headers.length - 1; i >= 0; i--) {
+                const headerRectTop = headers[i].getBoundingClientRect().top;
+                const absoluteTop = scrollY + iframeRectTop + headerRectTop;
+
+                if (scrollY + threshold >= absoluteTop) {
+                    currentText = headers[i].innerText.replace(/[\n\r]+/g, ' ').trim();
+                    break;
+                }
+            }
+
+            if (!currentText && headers.length > 0) {
+                currentText = headers[0].innerText.replace(/[\n\r]+/g, ' ').trim();
+            }
+
+            if (currentText) {
+                stickyHeader.innerText = currentText;
+                stickyHeader.style.opacity = scrollY > 150 ? '1' : '0';
+            }
+        };
+
+        // Initialize sticky header state
+        updateStickyHeader();
+
+        // High-performance scroll listener using requestAnimationFrame
+        let isTicking = false;
+        window.addEventListener('scroll', () => {
+            if (!isTicking) {
+                window.requestAnimationFrame(() => {
+                    updateStickyHeader();
+                    isTicking = false;
+                });
+                isTicking = true;
+            }
+        }, { passive: true });
+
+        console.log(`[RA Nav] Loaded ${headers.length} dates. Desktop mode: ${isDesktop}. UI throttled.`);
     }
 
-    // Start
     if (document.readyState === 'complete') {
         init();
     } else {
