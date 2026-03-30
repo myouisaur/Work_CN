@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Universal Event Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
-// @version      3.3
-// @description  Adds a "Copy Numbers" button to sites.
+// @version      3.5
+// @description  Adds a "Copy Numbers" button to sites. (Smart Observer for Zero-Delay UI)
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
 // @match        *://*.posh.vip/*
@@ -35,14 +35,27 @@
             domain: 'eventbrite.com',
             check: () => !!document.querySelector('[data-testid="amount-card-title"]'),
             extract: () => {
-                let ticketsSold = '', netSales = '';
+                let ticketsSold = '', netSales = '', freeTickets = undefined;
                 const titles = document.querySelectorAll('[data-testid="amount-card-title"]');
                 titles.forEach(titleElem => {
                     const titleText = titleElem.innerText.trim();
                     const card = titleElem.closest('div[class*="AmountCard"]')?.parentElement || titleElem.parentElement.parentElement;
+
                     if (titleText === "Tickets Sold") {
                         const valueElem = card.querySelector('[data-testid="amount-card-value"] p') || card.querySelector('[data-testid="amount-card-value"]') || card.querySelector('span');
                         ticketsSold = valueElem ? valueElem.innerText.trim() : '';
+
+                        // Extract exact free tickets number from the details text
+                        const detailsElems = card.querySelectorAll('p');
+                        detailsElems.forEach(p => {
+                            const text = p.innerText.toLowerCase();
+                            if (text.includes('free')) {
+                                const match = text.match(/(\d+)\s*free/);
+                                if (match) {
+                                    freeTickets = match[1];
+                                }
+                            }
+                        });
                     }
                     if (titleText === "Net Sales") {
                         const valueElem = card.querySelector('[data-testid="amount-card-value"] p') || card.querySelector('[data-testid="amount-card-value"]') || card.querySelector('span');
@@ -51,7 +64,8 @@
                 });
                 if (!netSales) netSales = '$0';
                 if (!ticketsSold && !netSales) throw new Error("Dashboard empty.");
-                return { tickets: ticketsSold, revenue: netSales };
+
+                return { tickets: ticketsSold, revenue: netSales, freeTickets: freeTickets };
             }
         },
         {
@@ -244,23 +258,25 @@
     let button = null;
     let badge = null;
     let toast = null;
+    let domObserver = null;
+    let scanTimer = null;
     let pollInterval = null;
     let hasFetchedData = false; // "Lock" to prevent RAM waste
 
     function init() {
         createUI();
 
-        // Navigation Hooks
+        // Navigation Hooks for Single Page Applications
         const originalPush = history.pushState;
         history.pushState = function() { originalPush.apply(history, arguments); resetAndScan(); };
         const originalReplace = history.replaceState;
         history.replaceState = function() { originalReplace.apply(history, arguments); resetAndScan(); };
         window.addEventListener('popstate', resetAndScan);
 
-        // Smart Polling
-        startPolling();
+        // Smart Lifecycle Management
+        startObservers();
         document.addEventListener('visibilitychange', () => {
-            document.hidden ? stopPolling() : startPolling();
+            document.hidden ? stopObservers() : startObservers();
         });
 
         // Initial Check
@@ -303,14 +319,31 @@
         scanPage();
     }
 
-    function startPolling() {
+    function startObservers() {
+        // 1. Smart DOM Observer (Instant response, extremely low CPU)
+        if (!domObserver) {
+            domObserver = new MutationObserver(() => {
+                // IMPORTANT: Only do work if we haven't successfully found data yet.
+                // Once data is locked in, this observer skips doing any work, saving RAM.
+                if (!activeModule || !hasFetchedData) {
+                    clearTimeout(scanTimer);
+                    scanTimer = setTimeout(scanPage, 150); // 150ms debounce prevents lag
+                }
+            });
+            domObserver.observe(document.body, { childList: true, subtree: true });
+        }
+
+        // 2. Slow Fallback (Safety net just in case)
         if (pollInterval) clearInterval(pollInterval);
-        pollInterval = setInterval(scanPage, 2500); // Low frequency
+        pollInterval = setInterval(() => {
+            if (!activeModule || !hasFetchedData) scanPage();
+        }, 3000);
     }
 
-    function stopPolling() {
-        if (pollInterval) clearInterval(pollInterval);
-        pollInterval = null;
+    function stopObservers() {
+        if (domObserver) { domObserver.disconnect(); domObserver = null; }
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        clearTimeout(scanTimer);
     }
 
     function scanPage() {
@@ -332,7 +365,7 @@
             else button.classList.remove('visible');
         }
 
-        // 3. Update Badge (Only if we haven't successfully fetched yet)
+        // 3. Update Badge & Lock state to protect CPU
         if (activeModule && !hasFetchedData) {
             try {
                 const data = activeModule.extract();
@@ -341,7 +374,7 @@
                     hasFetchedData = true; // Stop processing extraction until URL changes
                 }
             } catch (e) {
-                // Ignore extraction errors during polling (DOM might not be ready)
+                // Elements exist, but data hasn't populated yet. Ignore until next DOM mutation.
             }
         }
     }
@@ -365,7 +398,6 @@
             text = "With Sales";
             colorClass = "ues-badge-green";
         } else {
-            // Edge case: Revenue but no tickets? Treat as green
             text = "With Sales";
             colorClass = "ues-badge-green";
         }
@@ -386,7 +418,9 @@
             const tVal = parseNum(data.tickets);
             const rVal = parseNum(data.revenue);
 
-            if (tVal === 0 && rVal === 0) {
+            if (data.freeTickets !== undefined) {
+                fourthCol = data.freeTickets; // Eventbrite explicit override
+            } else if (tVal === 0 && rVal === 0) {
                 fourthCol = '0';
             } else if (tVal > 0 && rVal === 0) {
                 fourthCol = data.tickets; // Repeat ticket count
@@ -401,8 +435,6 @@
             await navigator.clipboard.writeText(finalString);
 
             showToast(`Copied! ${data.tickets} tickets - ${data.revenue}`, 'success');
-
-            // Ensure badge matches what we just copied
             updateBadge(data.tickets, data.revenue);
 
         } catch (err) {
