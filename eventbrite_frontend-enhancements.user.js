@@ -2,14 +2,14 @@
 // @name         [Eventbrite] Frontend Enhancements
 // @namespace    https://github.com/myouisaur/Eventbrite
 // @icon         https://www.eventbrite.com/favicon.ico
-// @version      1.6
+// @version      1.7
 // @description  Extracts high-resolution media, scales images to fit, and auto-expands descriptions on Eventbrite.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
 // @noframes
 // @grant        GM_addStyle
-// @updateURL    https://myouisaur.github.io/Eventbrite/frontend-enhancements.user.js
-// @downloadURL  https://myouisaur.github.io/Eventbrite/frontend-enhancements.user.js
+// @updateURL    https://myouisaur.github.io/Work_CN/eventbrite_frontend-enhancements.user.js
+// @downloadURL  https://myouisaur.github.io/Work_CN/eventbrite_frontend-enhancements.user.js
 // ==/UserScript==
 
 (function () {
