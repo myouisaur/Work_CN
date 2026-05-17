@@ -2,8 +2,8 @@
 // @name         [RA] Ticket Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://ra.co/static/favicon-32x32.png
-// @version      4.0
-// @description  Highlights events with ticket sales.
+// @version      4.1
+// @description  Highlights events with sales.
 // @author       Xiv
 // @match        *://*.ra.co/*
 // @updateURL    https://myouisaur.github.io/Work_CN/RA_ticket-sales-highlighter.user.js
@@ -22,8 +22,11 @@
         ROW_COLOR: "#90e0b4", // Mint Green highlight
         VENUE_COLOR: "#1e3a8a", // Deep Royal Blue for contrast
         RA_RED: "#ff4848", // RA Native Action Color
+        TEXT_DARK: "#151515",
         ROW_SELECTOR: "li.myEvents:not(.ra-processed)",
-        DEBOUNCE_MS: 100, // Reduced for snappier loading
+        DEBOUNCE_MS: 100,
+        ANIMATION_MS: 300,
+        STAGGER_MS: 30,
         ALLOWED_ORIGIN_SUFFIX: "ra.co"
     };
 
@@ -31,7 +34,8 @@
     const state = {
         debounceTimer: null,
         observer: null,
-        activeSalesCount: 0
+        animId: 0,
+        isMutating: false
     };
 
     // ==========================================
@@ -59,23 +63,20 @@
                 letter-spacing: 0.2px;
             }
 
-            /* --- HARDWARE ACCELERATED ACCORDION ANIMATION --- */
+            /* --- LIGHTWEIGHT FLIP ANIMATION ENGINE --- */
             li.myEvents.ra-no-sales {
-                transition: opacity 0.3s ease, max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease, border 0.3s ease;
-                transform-origin: top;
-                max-height: 400px; /* Safe bounds for RA blocks */
-                overflow: hidden; /* Required for fluid height collapse */
+                transition: opacity ${CONFIG.ANIMATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${CONFIG.ANIMATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+                transform-origin: center !important;
             }
 
-            body.ra-filter-active li.myEvents.ra-no-sales {
-                max-height: 0 !important;
-                padding-top: 0 !important;
-                padding-bottom: 0 !important;
-                margin-top: 0 !important;
-                margin-bottom: 0 !important;
+            body.ra-filter-fade li.myEvents.ra-no-sales {
                 opacity: 0 !important;
-                border: none !important;
+                transform: scale(0.95) !important;
                 pointer-events: none !important;
+            }
+
+            body.ra-filter-layout li.myEvents.ra-no-sales {
+                display: none !important;
             }
 
             /* Empty state styling */
@@ -92,12 +93,12 @@
                 opacity: 0;
                 transition: opacity 0.3s ease;
             }
-            body.ra-filter-active li.ra-empty-state.is-active {
+            body.ra-filter-layout li.ra-empty-state.is-active {
                 display: block;
                 opacity: 1;
             }
 
-            /* --- FLOATING SWITCH TOGGLE UI --- */
+            /* --- FLOATING SWITCH TOGGLE UI (Matching "Submit an event") --- */
             #ra-sales-toggle-container {
                 position: fixed;
                 bottom: calc(clamp(16px, 3vh, 32px) + env(safe-area-inset-bottom));
@@ -106,19 +107,22 @@
                 opacity: 0;
                 visibility: hidden;
                 transform: translateY(10px);
-                transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s ease, border-color 0.3s ease;
+                transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s ease, background-color 0.2s ease, border-color 0.2s ease;
 
-                background-color: #ffffff;
-                border: 1px solid #222222;
-                border-radius: 50px;
-                padding: 8px 16px 8px 12px;
-                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+                background-color: #ffffff !important;
+                border: 1px solid ${CONFIG.RA_RED} !important;
+                border-radius: 50px !important;
+                padding: 10px 18px !important;
+                height: 35px !important;
+                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08) !important;
                 display: flex;
                 align-items: center;
-                gap: 12px;
+                gap: 10px;
                 cursor: pointer;
                 user-select: none;
-                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+                box-sizing: border-box !important;
+
+                font-family: RobotoMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
             }
 
             #ra-sales-toggle-container.is-visible {
@@ -127,49 +131,74 @@
                 transform: translateY(0);
             }
 
+            /* Active State Inversion */
             #ra-sales-toggle-container.is-active {
-                border-color: ${CONFIG.RA_RED};
-                box-shadow: 0 4px 14px rgba(255, 72, 72, 0.15);
+                background-color: ${CONFIG.RA_RED} !important;
+                box-shadow: 0 4px 14px rgba(255, 72, 72, 0.2) !important;
             }
 
+            /* The Switch Track */
             .ra-switch-track {
-                width: 36px;
-                height: 20px;
-                background-color: #cccccc;
+                width: 32px;
+                height: 18px;
+                background-color: #e5e7eb;
                 border-radius: 20px;
                 position: relative;
                 transition: background-color 0.3s ease;
                 flex-shrink: 0;
             }
 
+            /* The Switch Knob */
             .ra-switch-knob {
-                width: 16px;
-                height: 16px;
+                width: 14px;
+                height: 14px;
                 background-color: #ffffff;
                 border-radius: 50%;
                 position: absolute;
                 top: 2px;
                 left: 2px;
                 transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.2);
             }
 
-            #ra-sales-toggle-container.is-active .ra-switch-track { background-color: ${CONFIG.RA_RED}; }
-            #ra-sales-toggle-container.is-active .ra-switch-knob { transform: translateX(16px); }
+            /* Active Track & Knob overrides */
+            #ra-sales-toggle-container.is-active .ra-switch-track {
+                background-color: rgba(255, 255, 255, 0.3) !important;
+            }
+            #ra-sales-toggle-container.is-active .ra-switch-knob {
+                transform: translateX(14px);
+            }
 
+            /* Text Label */
             .ra-toggle-label {
-                font-size: clamp(12px, 1vw, 13px);
-                font-weight: 500;
-                color: #222222;
-                transition: color 0.3s ease;
+                font-size: 11px !important;
+                font-weight: 500 !important;
+                color: ${CONFIG.TEXT_DARK} !important;
+                transition: color 0.2s ease, max-width 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+                white-space: nowrap;
+                overflow: hidden;
+                max-width: 150px;
+                opacity: 1;
             }
-            #ra-sales-toggle-container.is-active .ra-toggle-label { color: ${CONFIG.RA_RED}; }
+            #ra-sales-toggle-container.is-active .ra-toggle-label {
+                color: #ffffff !important;
+            }
 
-            #ra-sales-toggle-container:focus-visible { outline: 3px solid #222; outline-offset: 2px; }
+            #ra-sales-toggle-container:focus-visible { outline: 3px solid ${CONFIG.TEXT_DARK}; outline-offset: 2px; }
 
+            /* Responsive Mobile Compact View */
             @media (max-width: 768px) {
-                #ra-sales-toggle-container { padding: 10px; gap: 0; }
-                .ra-toggle-label { display: none; }
+                #ra-sales-toggle-container {
+                    padding: 8px !important;
+                    width: 35px !important;
+                    height: 35px !important;
+                    justify-content: center !important;
+                    gap: 0 !important;
+                }
+                .ra-toggle-label {
+                    max-width: 0 !important;
+                    opacity: 0 !important;
+                }
             }
         `;
         document.head.appendChild(style);
@@ -196,18 +225,19 @@
 
         const label = document.createElement('span');
         label.className = 'ra-toggle-label';
+        label.textContent = "Active Sales Only";
 
         container.appendChild(track);
         container.appendChild(label);
         document.body.appendChild(container);
 
         let isFiltered = sessionStorage.getItem('ra-sales-filtered') === 'true';
-        updateUIState(container, label, isFiltered);
+        updateUIState(container, isFiltered);
 
         const toggleFilter = () => {
             isFiltered = !isFiltered;
             sessionStorage.setItem('ra-sales-filtered', isFiltered);
-            updateUIState(container, label, isFiltered);
+            updateUIState(container, isFiltered);
             broadcastCommand('RA_TOGGLE_FILTER', isFiltered);
         };
 
@@ -229,8 +259,7 @@
         broadcastCommand('RA_SYNC_STATE', isFiltered);
     }
 
-    function updateUIState(container, labelNode, isActive) {
-        labelNode.textContent = "Active Sales Only";
+    function updateUIState(container, isActive) {
         if (isActive) {
             container.classList.add('is-active');
             container.setAttribute('aria-checked', 'true');
@@ -242,7 +271,6 @@
 
     function broadcastCommand(action, payloadData = null) {
         const payload = { action, payloadData };
-        // Memory Opt: Native loop
         const frames = document.querySelectorAll('iframe');
         for (let i = 0; i < frames.length; i++) {
             try {
@@ -256,17 +284,136 @@
     }
 
     // ==========================================
+    // FLIP ANIMATION ENGINE (Lightweight CPU Compositing)
+    // ==========================================
+
+    function animateListReflow(actionFn, onComplete, threadId) {
+        const activeCards = document.querySelectorAll('li.myEvents.ra-has-sales, li.ra-empty-state.is-active');
+
+        if (activeCards.length === 0) {
+            actionFn();
+            if (onComplete) requestAnimationFrame(onComplete);
+            return;
+        }
+
+        const firstRects = new Map();
+        activeCards.forEach(card => firstRects.set(card, card.getBoundingClientRect()));
+
+        actionFn();
+
+        requestAnimationFrame(() => {
+            if (state.animId !== threadId) return;
+
+            activeCards.forEach(card => {
+                const first = firstRects.get(card);
+                const last = card.getBoundingClientRect();
+                card.style.transition = 'none';
+                card.style.transform = `translate(${first.left - last.left}px, ${first.top - last.top}px)`;
+            });
+
+            requestAnimationFrame(() => {
+                if (state.animId !== threadId) return;
+
+                activeCards.forEach(card => {
+                    card.style.transition = `transform ${CONFIG.ANIMATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+                    card.style.transform = 'translate(0, 0)';
+                });
+
+                setTimeout(() => {
+                    if (state.animId !== threadId) return;
+                    activeCards.forEach(card => {
+                        card.style.transition = '';
+                        card.style.transform = '';
+                    });
+                    if (onComplete) onComplete();
+                }, CONFIG.ANIMATION_MS);
+            });
+        });
+    }
+
+    function applyToggleState(instant = false, forcedState = null) {
+        state.animId++;
+        const currentAnim = state.animId;
+        const isActive = forcedState !== null ? forcedState : (sessionStorage.getItem('ra-sales-filtered') === 'true');
+
+        const hiddenCards = document.querySelectorAll('li.myEvents.ra-no-sales');
+        const emptyState = document.querySelector('.ra-empty-state');
+        const hasAnySales = document.querySelectorAll('li.myEvents.ra-has-sales').length > 0;
+        const shouldShowEmpty = isActive && !hasAnySales;
+
+        // Clean orphaned styles safely
+        document.querySelectorAll('li.myEvents').forEach(card => card.style.removeProperty('transition-delay'));
+
+        if (instant) {
+            document.body.classList.toggle('ra-filter-fade', isActive);
+            document.body.classList.toggle('ra-filter-layout', isActive);
+            if (emptyState) {
+                emptyState.style.display = shouldShowEmpty ? 'block' : 'none';
+                emptyState.style.opacity = shouldShowEmpty ? '1' : '0';
+            }
+            return;
+        }
+
+        if (isActive) {
+            document.body.classList.add('ra-filter-fade');
+
+            setTimeout(() => {
+                if (state.animId !== currentAnim) return;
+
+                animateListReflow(() => {
+                    if (state.animId !== currentAnim) return;
+                    document.body.classList.add('ra-filter-layout');
+
+                    if (shouldShowEmpty && emptyState) {
+                        emptyState.style.display = 'block';
+                        requestAnimationFrame(() => emptyState.style.opacity = '1');
+                    }
+                }, null, currentAnim);
+            }, CONFIG.ANIMATION_MS);
+
+        } else {
+            if (emptyState) {
+                emptyState.style.opacity = '0';
+                setTimeout(() => {
+                    if (state.animId === currentAnim && emptyState) emptyState.style.display = 'none';
+                }, 200);
+            }
+
+            hiddenCards.forEach((card, index) => {
+                card.style.setProperty('transition-delay', `${index * CONFIG.STAGGER_MS}ms`, 'important');
+            });
+
+            animateListReflow(() => {
+                if (state.animId !== currentAnim) return;
+                document.body.classList.remove('ra-filter-layout');
+            }, null, currentAnim);
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if (state.animId !== currentAnim) return;
+                    document.body.classList.remove('ra-filter-fade');
+
+                    const totalWaterfallTime = CONFIG.ANIMATION_MS + (hiddenCards.length * CONFIG.STAGGER_MS);
+                    setTimeout(() => {
+                        if (state.animId !== currentAnim) return;
+                        hiddenCards.forEach(card => card.style.removeProperty('transition-delay'));
+                    }, totalWaterfallTime);
+                });
+            });
+        }
+    }
+
+    // ==========================================
     // DOM PROCESSING (Performance Optimized)
     // ==========================================
 
     function extractVenueNode(row) {
         const greyDivs = row.querySelectorAll('.grey');
-        // Memory Opt: Native loops to prevent Array allocations
         for (let i = 0; i < greyDivs.length; i++) {
             const childNodes = greyDivs[i].childNodes;
             for (let j = 0; j < childNodes.length; j++) {
                 const node = childNodes[j];
-                if (node.nodeType === 3) { // Node.TEXT_NODE
+                if (node.nodeType === 3) {
                     const match = node.nodeValue.match(/^(\s*at\s+)(.*?)(,\s*)?$/);
                     if (match && match[2]) return { venueTextNode: node, venueMatch: match };
                 }
@@ -283,13 +430,11 @@
         const containersToUpdate = new Set();
         let newSalesFound = 0;
 
-        // PHASE 1: Fast DOM Read
         for (let i = 0; i < eventRows.length; i++) {
             const row = eventRows[i];
-            row.classList.add('ra-processed'); // Mark early
+            row.classList.add('ra-processed');
 
             if (row.parentElement) containersToUpdate.add(row.parentElement);
-
             const statsLink = row.querySelector('.stats a, .stats');
             let hasSales = false;
 
@@ -310,11 +455,9 @@
         }
 
         if (newSalesFound > 0) {
-            state.activeSalesCount += newSalesFound;
             window.top.postMessage({ action: 'RA_EVENTS_FOUND' }, '*');
         }
 
-        // PHASE 2: Batched DOM Write via rAF
         requestAnimationFrame(() => {
             for (let i = 0; i < targets.length; i++) {
                 const { row, hasSales, venueTextNode, venueMatch } = targets[i];
@@ -341,18 +484,22 @@
                 }
             }
 
-            // Efficient Empty State check (O(1) fast-exit via querySelector)
             containersToUpdate.forEach(container => {
                 const hasAnySales = container.querySelector('.ra-has-sales') !== null;
-
                 let emptyStateNode = container.querySelector('.ra-empty-state');
+
                 if (!emptyStateNode) {
                     emptyStateNode = document.createElement('li');
                     emptyStateNode.className = 'ra-empty-state';
                     emptyStateNode.textContent = 'No active sales in this period.';
                     container.appendChild(emptyStateNode);
                 }
-                emptyStateNode.classList.toggle('is-active', !hasAnySales);
+
+                const isActive = sessionStorage.getItem('ra-sales-filtered') === 'true';
+                if (isActive && !hasAnySales) {
+                    emptyStateNode.style.display = 'block';
+                    emptyStateNode.style.opacity = '1';
+                }
             });
         });
     }
@@ -361,14 +508,13 @@
         state.observer = new MutationObserver((mutations) => {
             let shouldProcess = false;
 
-            // Memory Opt: Prevent Arrays inside the observer
             for (let i = 0; i < mutations.length; i++) {
                 const mutation = mutations[i];
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                     let isOwnMutation = true;
                     for (let j = 0; j < mutation.addedNodes.length; j++) {
                         const node = mutation.addedNodes[j];
-                        if (node.nodeType === 3) continue; // TEXT_NODE
+                        if (node.nodeType === 3) continue;
                         if (node.nodeType === 1 && (node.classList.contains('ra-venue-highlight') || node.classList.contains('ra-empty-state'))) {
                             continue;
                         }
@@ -405,9 +551,10 @@
             const action = e.data?.action;
             if (!action) return;
 
-            if (action === 'RA_SYNC_STATE' || action === 'RA_TOGGLE_FILTER') {
-                const isActive = e.data.payloadData === true;
-                document.body.classList.toggle('ra-filter-active', isActive);
+            if (action === 'RA_SYNC_STATE') {
+                applyToggleState(true, e.data.payloadData === true);
+            } else if (action === 'RA_TOGGLE_FILTER') {
+                applyToggleState(false, e.data.payloadData === true);
             }
         });
     }
