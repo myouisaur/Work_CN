@@ -2,8 +2,8 @@
 // @name         [RA] Ticket Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://ra.co/static/favicon-32x32.png
-// @version      3.4
-// @description  Highlights events with ticket sales, isolates venue names safely, and features a data-aware fluid filter.
+// @version      4.0
+// @description  Highlights events with ticket sales.
 // @author       Xiv
 // @match        *://*.ra.co/*
 // @updateURL    https://myouisaur.github.io/Work_CN/RA_ticket-sales-highlighter.user.js
@@ -21,8 +21,9 @@
     const CONFIG = {
         ROW_COLOR: "#90e0b4", // Mint Green highlight
         VENUE_COLOR: "#1e3a8a", // Deep Royal Blue for contrast
+        RA_RED: "#ff4848", // RA Native Action Color
         ROW_SELECTOR: "li.myEvents:not(.ra-processed)",
-        DEBOUNCE_MS: 150,
+        DEBOUNCE_MS: 100, // Reduced for snappier loading
         ALLOWED_ORIGIN_SUFFIX: "ra.co"
     };
 
@@ -38,33 +39,43 @@
     // ==========================================
 
     function injectBaseStyles() {
+        if (document.getElementById('ra-custom-styles')) return;
+
         const style = document.createElement('style');
+        style.id = 'ra-custom-styles';
         style.textContent = `
-            /* Phase 1: Visual Fade */
-            li.myEvents.ra-no-sales {
-                transition: opacity 0.3s ease;
+            /* Highlight Classes */
+            .ra-has-sales-bg {
+                background-color: ${CONFIG.ROW_COLOR} !important;
+                transition: background-color 0.4s ease !important;
             }
-            body.ra-filter-fade li.myEvents.ra-no-sales {
-                opacity: 0 !important;
-                pointer-events: none;
-            }
-
-            /* Phase 2: Layout Collapse */
-            body.ra-filter-layout li.myEvents.ra-no-sales {
-                display: none !important;
-            }
-
-            /* Fixes text contrast for standard text on highlighted rows */
             li.myEvents.ra-has-sales .grey,
             li.myEvents.ra-has-sales .grey a {
                 color: #222222 !important;
             }
-
-            /* Makes the isolated venue name pop out */
             .ra-venue-highlight {
                 color: ${CONFIG.VENUE_COLOR} !important;
                 font-weight: 800 !important;
                 letter-spacing: 0.2px;
+            }
+
+            /* --- HARDWARE ACCELERATED ACCORDION ANIMATION --- */
+            li.myEvents.ra-no-sales {
+                transition: opacity 0.3s ease, max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease, border 0.3s ease;
+                transform-origin: top;
+                max-height: 400px; /* Safe bounds for RA blocks */
+                overflow: hidden; /* Required for fluid height collapse */
+            }
+
+            body.ra-filter-active li.myEvents.ra-no-sales {
+                max-height: 0 !important;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                margin-top: 0 !important;
+                margin-bottom: 0 !important;
+                opacity: 0 !important;
+                border: none !important;
+                pointer-events: none !important;
             }
 
             /* Empty state styling */
@@ -81,14 +92,12 @@
                 opacity: 0;
                 transition: opacity 0.3s ease;
             }
-            body.ra-filter-layout li.ra-empty-state.is-active {
+            body.ra-filter-active li.ra-empty-state.is-active {
                 display: block;
-            }
-            body.ra-filter-fade li.ra-empty-state.is-active {
                 opacity: 1;
             }
 
-            /* Floating UI for the top window */
+            /* --- FLOATING SWITCH TOGGLE UI --- */
             #ra-sales-toggle-container {
                 position: fixed;
                 bottom: calc(clamp(16px, 3vh, 32px) + env(safe-area-inset-bottom));
@@ -97,170 +106,149 @@
                 opacity: 0;
                 visibility: hidden;
                 transform: translateY(10px);
-                transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s ease;
+                transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s ease, border-color 0.3s ease;
+
+                background-color: #ffffff;
+                border: 1px solid #222222;
+                border-radius: 50px;
+                padding: 8px 16px 8px 12px;
+                box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                cursor: pointer;
+                user-select: none;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
             }
+
             #ra-sales-toggle-container.is-visible {
                 opacity: 1;
                 visibility: visible;
                 transform: translateY(0);
             }
-            #ra-sales-toggle-btn {
-                background-color: #111;
-                color: #fff;
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                padding: clamp(8px, 1.5vh, 12px) clamp(16px, 2vw, 20px);
-                border-radius: 50px;
-                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                font-size: clamp(13px, 1vw, 14px);
-                font-weight: 500;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                transition: all 0.2s ease;
-                backdrop-filter: blur(8px);
-                -webkit-backdrop-filter: blur(8px);
-                outline: none;
+
+            #ra-sales-toggle-container.is-active {
+                border-color: ${CONFIG.RA_RED};
+                box-shadow: 0 4px 14px rgba(255, 72, 72, 0.15);
             }
 
-            /* Accessibility: Focus States */
-            #ra-sales-toggle-btn:focus-visible {
-                outline: 3px solid ${CONFIG.ROW_COLOR};
-                outline-offset: 3px;
-            }
-
-            #ra-sales-toggle-btn:hover {
-                background-color: #222;
-                transform: scale(1.02);
-            }
-            #ra-sales-toggle-btn:active {
-                transform: scale(0.98);
-            }
-            #ra-sales-toggle-btn .indicator {
-                width: 10px;
-                height: 10px;
-                border-radius: 50%;
-                background-color: #555;
-                transition: background-color 0.2s ease;
+            .ra-switch-track {
+                width: 36px;
+                height: 20px;
+                background-color: #cccccc;
+                border-radius: 20px;
+                position: relative;
+                transition: background-color 0.3s ease;
                 flex-shrink: 0;
             }
-            #ra-sales-toggle-btn.is-active .indicator {
-                background-color: ${CONFIG.ROW_COLOR};
-                box-shadow: 0 0 8px ${CONFIG.ROW_COLOR};
-            }
-            .btn-text {
-                transition: opacity 0.2s ease;
+
+            .ra-switch-knob {
+                width: 16px;
+                height: 16px;
+                background-color: #ffffff;
+                border-radius: 50%;
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             }
 
-            @media (prefers-color-scheme: light) {
-                #ra-sales-toggle-btn {
-                    background-color: #fff;
-                    color: #111;
-                    border: 1px solid rgba(0, 0, 0, 0.1);
-                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-                }
-                #ra-sales-toggle-btn:hover {
-                    background-color: #f5f5f5;
-                }
+            #ra-sales-toggle-container.is-active .ra-switch-track { background-color: ${CONFIG.RA_RED}; }
+            #ra-sales-toggle-container.is-active .ra-switch-knob { transform: translateX(16px); }
+
+            .ra-toggle-label {
+                font-size: clamp(12px, 1vw, 13px);
+                font-weight: 500;
+                color: #222222;
+                transition: color 0.3s ease;
+            }
+            #ra-sales-toggle-container.is-active .ra-toggle-label { color: ${CONFIG.RA_RED}; }
+
+            #ra-sales-toggle-container:focus-visible { outline: 3px solid #222; outline-offset: 2px; }
+
+            @media (max-width: 768px) {
+                #ra-sales-toggle-container { padding: 10px; gap: 0; }
+                .ra-toggle-label { display: none; }
             }
         `;
         document.head.appendChild(style);
     }
 
     // ==========================================
-    // TOP WINDOW UI LOGIC & ORCHESTRATION
+    // TOP WINDOW UI LOGIC
     // ==========================================
 
     function initTopWindowUI() {
         if (document.getElementById('ra-sales-toggle-container')) return;
 
-        // Toggle Filter UI
         const container = document.createElement('div');
         container.id = 'ra-sales-toggle-container';
+        container.setAttribute('role', 'switch');
+        container.setAttribute('tabindex', '0');
 
-        const btn = document.createElement('button');
-        btn.id = 'ra-sales-toggle-btn';
+        const track = document.createElement('div');
+        track.className = 'ra-switch-track';
 
-        const indicator = document.createElement('div');
-        indicator.className = 'indicator';
+        const knob = document.createElement('div');
+        knob.className = 'ra-switch-knob';
+        track.appendChild(knob);
 
-        const textSpan = document.createElement('span');
-        textSpan.className = 'btn-text';
+        const label = document.createElement('span');
+        label.className = 'ra-toggle-label';
 
-        btn.appendChild(indicator);
-        btn.appendChild(textSpan);
-        container.appendChild(btn);
+        container.appendChild(track);
+        container.appendChild(label);
         document.body.appendChild(container);
 
-        // State initialization
         let isFiltered = sessionStorage.getItem('ra-sales-filtered') === 'true';
-        let currentSalesCount = null;
-        updateUIState(btn, isFiltered, currentSalesCount);
+        updateUIState(container, label, isFiltered);
 
-        let isAnimating = false;
-
-        btn.addEventListener('click', () => {
-            if (isAnimating) return;
-            isAnimating = true;
-
+        const toggleFilter = () => {
             isFiltered = !isFiltered;
             sessionStorage.setItem('ra-sales-filtered', isFiltered);
-            updateUIState(btn, isFiltered, currentSalesCount);
+            updateUIState(container, label, isFiltered);
+            broadcastCommand('RA_TOGGLE_FILTER', isFiltered);
+        };
 
-            if (isFiltered) {
-                broadcastCommand('RA_FADE_OUT');
-                setTimeout(() => {
-                    broadcastCommand('RA_HIDE_LAYOUT');
-                    isAnimating = false;
-                }, 300);
-            } else {
-                broadcastCommand('RA_SHOW_LAYOUT');
-                setTimeout(() => {
-                    broadcastCommand('RA_FADE_IN');
-                    isAnimating = false;
-                }, 50);
+        container.addEventListener('click', toggleFilter);
+        container.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleFilter();
             }
         });
 
-        // Message Listener for revealing the button and updating counts
         window.addEventListener('message', (e) => {
             if (!isSafeOrigin(e.origin)) return;
-
             if (e.data && e.data.action === 'RA_EVENTS_FOUND') {
                 container.classList.add('is-visible');
-
-                if (typeof e.data.count === 'number') {
-                    currentSalesCount = e.data.count;
-                    updateUIState(btn, isFiltered, currentSalesCount);
-                }
             }
         });
 
-        // Immediately sync truth state down to iframes to bypass sessionStorage isolation
         broadcastCommand('RA_SYNC_STATE', isFiltered);
     }
 
-    function updateUIState(btn, isActive, count) {
-        const textSpan = btn.querySelector('.btn-text');
-        const countText = count !== null ? ` (${count})` : '';
-
+    function updateUIState(container, labelNode, isActive) {
+        labelNode.textContent = "Active Sales Only";
         if (isActive) {
-            btn.classList.add('is-active');
-            textSpan.textContent = `Filtered: Active sales only${countText}`;
+            container.classList.add('is-active');
+            container.setAttribute('aria-checked', 'true');
         } else {
-            btn.classList.remove('is-active');
-            textSpan.textContent = `Show only events with sales${countText}`;
+            container.classList.remove('is-active');
+            container.setAttribute('aria-checked', 'false');
         }
     }
 
     function broadcastCommand(action, payloadData = null) {
         const payload = { action, payloadData };
-        document.querySelectorAll('iframe').forEach(iframe => {
+        // Memory Opt: Native loop
+        const frames = document.querySelectorAll('iframe');
+        for (let i = 0; i < frames.length; i++) {
             try {
-                if (iframe.contentWindow) iframe.contentWindow.postMessage(payload, '*');
+                if (frames[i].contentWindow) frames[i].contentWindow.postMessage(payload, '*');
             } catch (error) {}
-        });
+        }
     }
 
     function isSafeOrigin(origin) {
@@ -268,18 +256,17 @@
     }
 
     // ==========================================
-    // EVENT PROCESSING (Runs where events exist)
+    // DOM PROCESSING (Performance Optimized)
     // ==========================================
 
-    /**
-     * Extracts the specific venue text node safely, preventing deep nesting.
-     */
     function extractVenueNode(row) {
         const greyDivs = row.querySelectorAll('.grey');
-        for (const div of greyDivs) {
-            for (const node of div.childNodes) {
-                if (node.nodeType === Node.TEXT_NODE) {
-                    // Captures: 1 = "at ", 2 = Venue Name, 3 = ", "
+        // Memory Opt: Native loops to prevent Array allocations
+        for (let i = 0; i < greyDivs.length; i++) {
+            const childNodes = greyDivs[i].childNodes;
+            for (let j = 0; j < childNodes.length; j++) {
+                const node = childNodes[j];
+                if (node.nodeType === 3) { // Node.TEXT_NODE
                     const match = node.nodeValue.match(/^(\s*at\s+)(.*?)(,\s*)?$/);
                     if (match && match[2]) return { venueTextNode: node, venueMatch: match };
                 }
@@ -292,54 +279,51 @@
         const eventRows = document.querySelectorAll(CONFIG.ROW_SELECTOR);
         if (eventRows.length === 0) return;
 
-        const rowsWithSales = [];
-        const parentContainers = new Set();
+        const targets = [];
+        const containersToUpdate = new Set();
         let newSalesFound = 0;
 
-        // Phase 1: DOM Read & Mark
-        eventRows.forEach(row => {
-            row.classList.add('ra-processed');
-            if (row.parentElement) parentContainers.add(row.parentElement);
+        // PHASE 1: Fast DOM Read
+        for (let i = 0; i < eventRows.length; i++) {
+            const row = eventRows[i];
+            row.classList.add('ra-processed'); // Mark early
 
-            const statsLink = row.querySelector('.stats a') || row.querySelector('.stats');
+            if (row.parentElement) containersToUpdate.add(row.parentElement);
+
+            const statsLink = row.querySelector('.stats a, .stats');
             let hasSales = false;
 
             if (statsLink && statsLink.textContent) {
-                const text = statsLink.textContent.trim();
-                const match = text.match(/(\d+)\s*tickets?\s*sold/i);
-
-                if (match) {
-                    const count = parseInt(match[1], 10);
-                    if (!isNaN(count) && count > 0) {
-                        hasSales = true;
-                    }
+                const match = statsLink.textContent.trim().match(/(\d+)\s*tickets?\s*sold/i);
+                if (match && parseInt(match[1], 10) > 0) {
+                    hasSales = true;
                 }
             }
 
             if (hasSales) {
                 newSalesFound++;
                 const { venueTextNode, venueMatch } = extractVenueNode(row);
-                rowsWithSales.push({ row, venueTextNode, venueMatch });
-                row.classList.add('ra-has-sales');
+                targets.push({ row, hasSales: true, venueTextNode, venueMatch });
             } else {
-                row.classList.add('ra-no-sales');
+                targets.push({ row, hasSales: false });
             }
-        });
+        }
 
-        state.activeSalesCount += newSalesFound;
+        if (newSalesFound > 0) {
+            state.activeSalesCount += newSalesFound;
+            window.top.postMessage({ action: 'RA_EVENTS_FOUND' }, '*');
+        }
 
-        // Phase 2: Batched Style Mutations
-        if (rowsWithSales.length > 0 || parentContainers.size > 0) {
-            requestAnimationFrame(() => {
-                rowsWithSales.forEach(({ row, venueTextNode, venueMatch }) => {
-                    row.style.setProperty('background-color', CONFIG.ROW_COLOR, 'important');
-                    row.style.setProperty('transition', 'background-color 0.4s ease', 'important');
+        // PHASE 2: Batched DOM Write via rAF
+        requestAnimationFrame(() => {
+            for (let i = 0; i < targets.length; i++) {
+                const { row, hasSales, venueTextNode, venueMatch } = targets[i];
 
-                    // Security: Try/Catch isolates DOM manipulation errors per row
+                if (hasSales) {
+                    row.classList.add('ra-has-sales', 'ra-has-sales-bg');
                     if (venueTextNode && venueMatch) {
                         try {
                             const parent = venueTextNode.parentNode;
-
                             const leadingNode = document.createTextNode(venueMatch[1]);
                             const venueSpan = document.createElement('span');
                             venueSpan.className = 'ra-venue-highlight';
@@ -350,52 +334,47 @@
                             parent.insertBefore(venueSpan, venueTextNode);
                             parent.insertBefore(trailingNode, venueTextNode);
                             parent.removeChild(venueTextNode);
-                        } catch (e) {
-                            console.warn("[RA Ticket Sales] Failed to isolate venue name:", e);
-                        }
+                        } catch (e) {}
                     }
-                });
+                } else {
+                    row.classList.add('ra-no-sales');
+                }
+            }
 
-                parentContainers.forEach(container => {
-                    let emptyStateNode = container.querySelector('.ra-empty-state');
-                    if (!emptyStateNode) {
-                        emptyStateNode = document.createElement('li');
-                        emptyStateNode.className = 'ra-empty-state';
-                        emptyStateNode.textContent = 'No active sales in this period.';
-                        container.appendChild(emptyStateNode);
-                    }
+            // Efficient Empty State check (O(1) fast-exit via querySelector)
+            containersToUpdate.forEach(container => {
+                const hasAnySales = container.querySelector('.ra-has-sales') !== null;
 
-                    const allEvents = Array.from(container.querySelectorAll('li.myEvents'));
-                    const anySales = allEvents.some(li => li.classList.contains('ra-has-sales'));
-
-                    if (!anySales) {
-                        emptyStateNode.classList.add('is-active');
-                    } else {
-                        emptyStateNode.classList.remove('is-active');
-                    }
-                });
+                let emptyStateNode = container.querySelector('.ra-empty-state');
+                if (!emptyStateNode) {
+                    emptyStateNode = document.createElement('li');
+                    emptyStateNode.className = 'ra-empty-state';
+                    emptyStateNode.textContent = 'No active sales in this period.';
+                    container.appendChild(emptyStateNode);
+                }
+                emptyStateNode.classList.toggle('is-active', !hasAnySales);
             });
-        }
-
-        // Broadcast success and count to the orchestrator window
-        window.top.postMessage({ action: 'RA_EVENTS_FOUND', count: state.activeSalesCount }, '*');
+        });
     }
 
     function initObserver() {
         state.observer = new MutationObserver((mutations) => {
             let shouldProcess = false;
 
-            // Performance: Intelligently ignore the script's own DOM mutations to prevent loops
-            for (const mutation of mutations) {
+            // Memory Opt: Prevent Arrays inside the observer
+            for (let i = 0; i < mutations.length; i++) {
+                const mutation = mutations[i];
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    const isOwnMutation = Array.from(mutation.addedNodes).every(node => {
-                        if (node.nodeType === Node.TEXT_NODE) return true;
-                        if (node.nodeType === Node.ELEMENT_NODE) {
-                            return node.classList.contains('ra-venue-highlight') ||
-                                   node.classList.contains('ra-empty-state');
+                    let isOwnMutation = true;
+                    for (let j = 0; j < mutation.addedNodes.length; j++) {
+                        const node = mutation.addedNodes[j];
+                        if (node.nodeType === 3) continue; // TEXT_NODE
+                        if (node.nodeType === 1 && (node.classList.contains('ra-venue-highlight') || node.classList.contains('ra-empty-state'))) {
+                            continue;
                         }
-                        return false;
-                    });
+                        isOwnMutation = false;
+                        break;
+                    }
 
                     if (!isOwnMutation) {
                         shouldProcess = true;
@@ -406,9 +385,7 @@
 
             if (shouldProcess) {
                 if (state.debounceTimer) clearTimeout(state.debounceTimer);
-                state.debounceTimer = setTimeout(() => {
-                    processTicketSales();
-                }, CONFIG.DEBOUNCE_MS);
+                state.debounceTimer = setTimeout(processTicketSales, CONFIG.DEBOUNCE_MS);
             }
         });
 
@@ -428,25 +405,9 @@
             const action = e.data?.action;
             if (!action) return;
 
-            switch(action) {
-                case 'RA_SYNC_STATE':
-                    // Force state sync directly from top window immediately on load
-                    if (e.data.payloadData === true) {
-                        document.body.classList.add('ra-filter-fade', 'ra-filter-layout');
-                    }
-                    break;
-                case 'RA_FADE_OUT':
-                    document.body.classList.add('ra-filter-fade');
-                    break;
-                case 'RA_FADE_IN':
-                    document.body.classList.remove('ra-filter-fade');
-                    break;
-                case 'RA_HIDE_LAYOUT':
-                    document.body.classList.add('ra-filter-layout');
-                    break;
-                case 'RA_SHOW_LAYOUT':
-                    document.body.classList.remove('ra-filter-layout');
-                    break;
+            if (action === 'RA_SYNC_STATE' || action === 'RA_TOGGLE_FILTER') {
+                const isActive = e.data.payloadData === true;
+                document.body.classList.toggle('ra-filter-active', isActive);
             }
         });
     }
@@ -458,10 +419,9 @@
     function init() {
         injectBaseStyles();
 
-        // Best effort fallback sync for isolated tabs (if not iframed)
         const isCurrentlyFiltered = sessionStorage.getItem('ra-sales-filtered') === 'true';
         if (isCurrentlyFiltered && window.top === window.self) {
-            document.body.classList.add('ra-filter-fade', 'ra-filter-layout');
+            document.body.classList.add('ra-filter-active');
         }
 
         if (window.top === window.self) {
