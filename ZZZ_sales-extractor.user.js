@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
-// @icon         //none
-// @version      5.4
-// @description  Extracts ticket sales and revenue data from event dashboards.
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRDA0MTBDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJ2MjBtLTctN2w3IDcgNy03Ii8+PC9zdmc+
+// @version      6.1
+// @description  Extracts ticket sales and revenue data from supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
 // @match        *://*.posh.vip/*
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-    if (window !== window.top) return; // Failsafe for @noframes
+    if (window !== window.top) return;
     if (window.__uese_initialized) return;
     window.__uese_initialized = true;
 
@@ -36,13 +36,13 @@
         POLL_BASE_DELAY_MS: 1000,
         POLL_MAX_ATTEMPTS: 15,
         POLL_MULTIPLIER: 1.5,
-        HISTORY_LIMIT: 5,
         UI_Z_INDEX: 2147483647,
         DEFAULTS: {
             TICKETS: '0',
             REVENUE: '$0',
             TEXT_SOLD: 'Tickets Sold',
-            TEXT_NET: 'Net Sales'
+            TEXT_NET: 'Net Sales',
+            TEXT_CHECK_FREE: 'check free tix'
         }
     };
 
@@ -53,8 +53,8 @@
         pollCount: 0,
         pollTimer: null,
         scanTimer: null,
-        history: [],
-        themeConfig: null
+        themeConfig: null,
+        observedRoot: document.body
     };
 
     // ============================================================================
@@ -68,43 +68,26 @@
     };
 
     const Storage = {
-        init() {
+        get(key, def) {
             try {
-                const oldHistory = sessionStorage.getItem('uese_history');
-                if (oldHistory) {
-                    GM_setValue('uese_history', JSON.parse(oldHistory));
-                    sessionStorage.removeItem('uese_history');
-                }
-                const data = GM_getValue('uese_history', []);
-                State.history = Array.isArray(data) ? data : [];
-            } catch (err) {
-                Logger.error('Storage', 'Failed to load history, resetting.', err);
-                State.history = [];
-            }
+                return typeof GM_getValue !== 'undefined' ? GM_getValue(key, def) : (JSON.parse(localStorage.getItem(key)) ?? def);
+            } catch { return def; }
         },
-        saveHistory(entry) {
-            State.history.unshift(entry);
-            if (State.history.length > CONFIG.HISTORY_LIMIT) State.history.pop();
+        set(key, val) {
             try {
-                GM_setValue('uese_history', State.history);
-                UI.renderHistory();
-            } catch (err) {
-                Logger.error('Storage', 'Failed to save history', err);
-            }
+                typeof GM_setValue !== 'undefined' ? GM_setValue(key, val) : localStorage.setItem(key, JSON.stringify(val));
+            } catch { /* Ignore gracefully */ }
         },
         getPosition() {
-            return {
-                x: GM_getValue('uese_pos_x', null),
-                y: GM_getValue('uese_pos_y', null)
-            };
+            return { x: this.get('uese_pos_x', null), y: this.get('uese_pos_y', null) };
         },
         setPosition(x, y) {
-            GM_setValue('uese_pos_x', x);
-            GM_setValue('uese_pos_y', y);
+            this.set('uese_pos_x', x);
+            this.set('uese_pos_y', y);
         },
         resetPosition() {
-            GM_setValue('uese_pos_x', null);
-            GM_setValue('uese_pos_y', null);
+            this.set('uese_pos_x', null);
+            this.set('uese_pos_y', null);
         }
     };
 
@@ -162,19 +145,20 @@
         {
             name: 'Eventbrite',
             domain: 'eventbrite.com',
-            theme: { bgRGB: '255, 255, 255', textRGB: '15, 15, 15', accent: '#D0410C', accentSec: '#3D64FF' },
+            rootSelector: '#root, main',
+            theme: { accent: '#D0410C', accentSec: '#3D64FF' },
             check: () => {
-                const nodes = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, strong, b');
-                const exactMatch = Array.from(nodes).some(el => el.children.length === 0 && el.textContent.trim() === CONFIG.DEFAULTS.TEXT_SOLD);
-                const legacyMatch = Array.from(document.querySelectorAll('[data-testid="amount-card-title"]')).some(el => el.innerText.trim() === CONFIG.DEFAULTS.TEXT_SOLD);
-                return exactMatch || legacyMatch;
+                try {
+                    const exactMatch = document.evaluate(`//*[not(*) and normalize-space(text())='${CONFIG.DEFAULTS.TEXT_SOLD}']`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+                    const legacyMatch = document.querySelector('[data-testid="amount-card-title"]');
+                    return !!exactMatch || (legacyMatch && legacyMatch.innerText.trim() === CONFIG.DEFAULTS.TEXT_SOLD);
+                } catch (e) { return false; }
             },
             extract: () => {
                 let ticketsSold = '', netSales = '', freeTickets = undefined;
 
                 const findCard = (targetText) => {
-                    const nodes = document.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, strong, b');
-                    const targetNode = Array.from(nodes).find(el => el.children.length === 0 && el.textContent.trim() === targetText);
+                    const targetNode = document.evaluate(`//*[not(*) and normalize-space(text())='${targetText}']`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     if (!targetNode) return null;
                     let parent = targetNode.parentElement;
                     for (let i = 0; i < 5; i++) {
@@ -223,7 +207,8 @@
         {
             name: 'Posh',
             domain: 'posh.vip',
-            theme: { bgRGB: '0, 0, 0', textRGB: '255, 255, 255', accent: '#FFFFFF', accentSec: '#FFFFFF' },
+            rootSelector: '#__next, #root',
+            theme: { accent: '#FFFFFF', accentSec: '#FFFFFF' },
             check: () => !!document.querySelector('div.CrossSection__w3a2U'),
             extract: () => {
                 let ticketsSold = '', totalRevenue = CONFIG.DEFAULTS.REVENUE;
@@ -239,7 +224,8 @@
         {
             name: 'Resident Advisor',
             domain: 'ra.co',
-            theme: { bgRGB: '255, 255, 255', textRGB: '0, 0, 0', accent: '#FF4848', accentSec: '#FF4848' },
+            rootSelector: '#__next',
+            theme: { accent: '#FF4848', accentSec: '#FF4848' },
             check: () => !!document.querySelector('span[color="primary"]'),
             extract: () => {
                 let tickets = CONFIG.DEFAULTS.TICKETS, revenue = CONFIG.DEFAULTS.REVENUE;
@@ -257,7 +243,8 @@
         {
             name: 'Seetickets / Eventim',
             domain: 'eventim.us',
-            theme: { bgRGB: '255, 255, 255', textRGB: '0, 25, 38', accent: '#0C9A9A', accentSec: '#001926' },
+            rootSelector: 'body',
+            theme: { accent: '#0C9A9A', accentSec: '#001926' },
             check: () => !!document.querySelector('#table table'),
             extract: () => {
                 const dataRow = document.querySelectorAll('#table table tr')[1];
@@ -272,7 +259,8 @@
         {
             name: 'Boletos Express',
             domain: 'boletosexpress.com',
-            theme: { bgRGB: '247, 247, 248', textRGB: '20, 20, 20', accent: '#1C2A7C', accentSec: '#1C2A7C' },
+            rootSelector: 'body',
+            theme: { accent: '#1C2A7C', accentSec: '#1C2A7C' },
             check: () => !!document.querySelector('#audit'),
             extract: () => {
                 let tickets = CONFIG.DEFAULTS.TICKETS;
@@ -288,7 +276,8 @@
         {
             name: 'Tickeri',
             domain: 'tickeri.com',
-            theme: { bgRGB: '255, 255, 255', textRGB: '0, 0, 0', accent: '#EB0045', accentSec: '#000000' },
+            rootSelector: 'body',
+            theme: { accent: '#EB0045', accentSec: '#000000' },
             check: () => document.body.innerText.includes('Ticket Inventory'),
             extract: () => {
                 let tickets = CONFIG.DEFAULTS.TICKETS, revenue = CONFIG.DEFAULTS.REVENUE;
@@ -314,28 +303,30 @@
         init() {
             this.injectStyles();
             this.buildWidget();
-            this.buildHistoryPanel();
             this.buildToast();
         },
 
         injectStyles() {
             GM_addStyle(`
                 :root {
-                    --uese-bg-rgb: 255, 255, 255;
-                    --uese-text-rgb: 15, 15, 15;
+                    /* Hardcoded dark mode constants */
+                    --uese-bg-rgb: 20, 20, 20;
+                    --uese-text-rgb: 245, 245, 245;
+
+                    /* Dynamic accents overwritten by applyTheme */
                     --uese-accent: #D0410C;
                     --uese-accent-sec: #3D64FF;
                     --uese-accent-rgb: 208, 65, 12;
                     --uese-accent-sec-rgb: 61, 100, 255;
 
-                    --uese-glass-bg: rgba(var(--uese-bg-rgb), 0.45);
-                    --uese-glass-border: rgba(var(--uese-accent-rgb), 0.25);
-                    --uese-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.15), 0 0 15px rgba(var(--uese-accent-rgb), 0.1);
+                    --uese-glass-bg: rgba(var(--uese-bg-rgb), 0.85);
+                    --uese-glass-border: rgba(var(--uese-accent-rgb), 0.6);
+                    --uese-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), 0 0 10px 1px rgba(var(--uese-accent-rgb), 0.4);
                 }
                 .uese-glass {
                     background: var(--uese-glass-bg);
-                    backdrop-filter: blur(16px);
-                    -webkit-backdrop-filter: blur(16px);
+                    backdrop-filter: blur(24px);
+                    -webkit-backdrop-filter: blur(24px);
                     border: 1px solid var(--uese-glass-border);
                     box-shadow: var(--uese-glass-shadow);
                     color: rgb(var(--uese-text-rgb));
@@ -354,7 +345,7 @@
                     opacity: 0;
                     pointer-events: none;
                     transform: translateX(-50%) translateY(-10px);
-                    transition: opacity 0.3s ease, transform 0.3s ease;
+                    transition: opacity 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
                 }
                 .uese-widget.uese-visible {
                     opacity: 1;
@@ -371,17 +362,20 @@
                     align-items: center;
                     opacity: 0.6;
                     transition: opacity 0.2s, color 0.2s;
+                    border-radius: 6px;
                 }
-                .uese-drag-handle:hover {
+                .uese-drag-handle:hover, .uese-drag-handle:focus-visible {
                     opacity: 1;
                     color: var(--uese-accent);
+                    outline: 2px solid var(--uese-accent);
+                    outline-offset: 2px;
                 }
                 .uese-drag-handle:active { cursor: grabbing; }
 
                 .uese-btn {
-                    background: rgba(var(--uese-accent-rgb), 0.08);
+                    background: rgba(255, 255, 255, 0.05);
                     color: rgb(var(--uese-text-rgb));
-                    border: 1px solid rgba(var(--uese-accent-rgb), 0.15);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
                     padding: 0.6rem 1rem;
                     border-radius: 10px;
                     font-weight: 600;
@@ -389,7 +383,7 @@
                     cursor: pointer;
                     display: flex;
                     align-items: center;
-                    gap: 0.5rem;
+                    gap: 0.6rem;
                     transition: all 0.2s ease;
                     min-height: 40px;
                     position: relative;
@@ -409,98 +403,78 @@
                 .uese-btn.uese-icon-only {
                     padding: 0.6rem;
                 }
+
+                @keyframes uese-spin {
+                    100% { transform: rotate(360deg); }
+                }
+                .uese-spin svg {
+                    animation: uese-spin 1s linear infinite;
+                }
+
                 .uese-status-text {
                     transition: color 0.3s ease;
                 }
 
                 .uese-indicator {
-                    width: 8px;
-                    height: 8px;
+                    width: 10px;
+                    height: 10px;
                     border-radius: 50%;
                     background-color: var(--indicator-color, #888);
                     box-shadow: 0 0 6px var(--indicator-color, transparent);
+                    border: 2px solid transparent;
                     transition: all 0.3s ease;
                     flex-shrink: 0;
                 }
-                .uese-indicator.green { --indicator-color: #10b981; }
-                .uese-indicator.yellow { --indicator-color: #f59e0b; }
-                .uese-indicator.red { --indicator-color: #ef4444; }
+                .uese-indicator.green {
+                    --indicator-color: #10b981;
+                    border-color: #047857;
+                }
+                .uese-indicator.yellow {
+                    --indicator-color: #f59e0b;
+                    border-color: #b45309;
+                    border-style: dashed;
+                    background-color: transparent;
+                }
+                .uese-indicator.red {
+                    --indicator-color: #ef4444;
+                    border-radius: 2px; /* Square shape for error */
+                }
                 .uese-indicator.scanning {
                     --indicator-color: #3b82f6;
                     animation: uese-pulse 1.5s infinite;
                 }
                 @keyframes uese-pulse {
-                    0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--indicator-color); }
-                    50% { opacity: 1; box-shadow: 0 0 10px var(--indicator-color); }
+                    0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--indicator-color); transform: scale(1); }
+                    50% { opacity: 1; box-shadow: 0 0 10px var(--indicator-color); transform: scale(1.1); }
                 }
 
                 .uese-tooltip {
                     position: absolute;
-                    bottom: -35px;
+                    top: calc(100% + 10px);
                     left: 50%;
                     transform: translateX(-50%);
                     background: rgb(var(--uese-text-rgb));
                     color: rgb(var(--uese-bg-rgb));
-                    padding: 4px 10px;
+                    padding: 6px 12px;
                     border-radius: 6px;
                     font-size: 12px;
                     font-weight: 500;
                     white-space: nowrap;
                     opacity: 0;
                     pointer-events: none;
-                    transition: opacity 0.2s ease;
+                    transition: opacity 0.2s ease, transform 0.2s ease;
                     border: 1px solid var(--uese-glass-border);
                     box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                    z-index: 10;
                 }
-                .uese-btn:hover .uese-tooltip { opacity: 1; }
-
-                .uese-history-panel {
-                    position: fixed;
-                    width: clamp(260px, 90vw, 320px);
-                    border-radius: 14px;
-                    z-index: ${CONFIG.UI_Z_INDEX};
-                    padding: 1rem;
-                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                    opacity: 0;
-                    pointer-events: none;
-                    transition: opacity 0.2s ease;
+                .uese-tooltip.uese-flip {
+                    top: auto;
+                    bottom: calc(100% + 10px);
                 }
-                .uese-history-panel.uese-open {
+                .uese-btn:hover .uese-tooltip, .uese-btn:focus-visible .uese-tooltip {
                     opacity: 1;
-                    pointer-events: auto;
                 }
-                .uese-history-header {
-                    font-weight: bold;
-                    margin-bottom: 0.75rem;
-                    padding-bottom: 0.5rem;
-                    border-bottom: 1px solid var(--uese-glass-border);
-                    display: flex;
-                    justify-content: space-between;
-                }
-                .uese-history-item {
-                    font-size: 0.85rem;
-                    padding: 0.6rem;
-                    border-bottom: 1px solid var(--uese-glass-border);
-                    cursor: pointer;
-                    display: flex;
-                    justify-content: space-between;
-                    transition: background 0.2s, border-color 0.2s;
-                    border-radius: 8px;
-                    margin-bottom: 4px;
-                }
-                .uese-history-item:hover {
-                    background: rgba(var(--uese-accent-sec-rgb), 0.08);
-                    border-color: rgba(var(--uese-accent-sec-rgb), 0.3);
-                }
-                .uese-history-item:last-child {
-                    border-bottom: none;
-                    margin-bottom: 0;
-                }
-                .uese-history-domain {
-                    opacity: 0.6;
-                    font-size: 0.7rem;
-                    margin-top: 2px;
-                }
+
                 .uese-toast {
                     position: fixed;
                     bottom: clamp(10px, 4vh, 24px);
@@ -528,43 +502,53 @@
 
         buildWidget() {
             this.els.wrapper = Utils.el('div', 'uese-widget uese-glass');
+
             this.els.dragHandle = Utils.el('div', 'uese-drag-handle');
             this.els.dragHandle.title = 'Drag to move (Double-Click to Reset)';
+            this.els.dragHandle.setAttribute('tabindex', '0');
+            this.els.dragHandle.setAttribute('aria-label', 'Move Extractor Widget');
             this.els.dragHandle.appendChild(Utils.createSvgIcon("M9 5h2v2H9V5zm0 6h2v2H9v-2zm0 6h2v2H9v-2zm4-12h2v2h-2V5zm0 6h2v2h-2v-2zm0 6h2v2h-2v-2z"));
 
             this.els.copyBtn = Utils.el('button', 'uese-btn');
+            this.els.copyBtn.setAttribute('aria-label', 'Copy Extracted Data');
 
+            // 1. Indicator
             this.els.indicator = Utils.el('div', 'uese-indicator scanning');
             this.els.copyBtn.appendChild(this.els.indicator);
 
-            this.els.copyBtn.appendChild(Utils.createSvgIcon("M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"));
-
+            // 2. Status Text
             this.els.statusText = Utils.el('span', 'uese-status-text', 'Scanning...');
             this.els.copyBtn.appendChild(this.els.statusText);
 
-            this.els.statusIcon = Utils.createSvgIcon("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", "rgba(var(--uese-text-rgb), 0.5)");
-            this.els.copyBtn.appendChild(this.els.statusIcon);
+            // 3. Copy Icon (moved to replace the checkmark)
+            this.els.copyIcon = Utils.createSvgIcon("M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3");
+            this.els.copyBtn.appendChild(this.els.copyIcon);
 
-            const tooltip = Utils.el('span', 'uese-tooltip', 'Shift+Click for JSON');
-            this.els.copyBtn.appendChild(tooltip);
+            this.els.tooltip = Utils.el('span', 'uese-tooltip', 'Shift+Click for JSON');
+            this.els.copyBtn.appendChild(this.els.tooltip);
 
             this.els.refreshBtn = Utils.el('button', 'uese-btn uese-icon-only');
             this.els.refreshBtn.title = 'Force Re-scan';
+            this.els.refreshBtn.setAttribute('aria-label', 'Force Re-scan');
             this.els.refreshBtn.appendChild(Utils.createSvgIcon("M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"));
 
-            this.els.historyBtn = Utils.el('button', 'uese-btn uese-icon-only');
-            this.els.historyBtn.title = 'View Recent History';
-            this.els.historyBtn.appendChild(Utils.createSvgIcon("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"));
-
-            this.els.wrapper.append(this.els.dragHandle, this.els.copyBtn, this.els.refreshBtn, this.els.historyBtn);
+            this.els.wrapper.append(this.els.dragHandle, this.els.copyBtn, this.els.refreshBtn);
             document.body.appendChild(this.els.wrapper);
 
             this.loadSafePosition();
 
             this.els.copyBtn.addEventListener('click', (e) => Extractor.executeCopy(e.shiftKey));
             this.els.refreshBtn.addEventListener('click', () => App.resetAndScan(true));
-            this.els.historyBtn.addEventListener('click', () => this.toggleHistory());
             this.els.dragHandle.addEventListener('dblclick', () => this.resetPosition());
+
+            this.els.copyBtn.addEventListener('mouseenter', (e) => {
+                const rect = e.target.getBoundingClientRect();
+                if (window.innerHeight - rect.bottom < 60) {
+                    this.els.tooltip.classList.add('uese-flip');
+                } else {
+                    this.els.tooltip.classList.remove('uese-flip');
+                }
+            });
 
             this.initDraggable(this.els.wrapper, this.els.dragHandle);
         },
@@ -572,15 +556,13 @@
         ensureInDOM() {
             if (!this.els.wrapper) return;
             if (!document.body.contains(this.els.wrapper)) document.body.appendChild(this.els.wrapper);
-            if (!document.body.contains(this.els.historyPanel)) document.body.appendChild(this.els.historyPanel);
             if (!document.body.contains(this.els.toast)) document.body.appendChild(this.els.toast);
         },
 
         applyTheme(themeObj) {
             if (!themeObj) return;
             const root = document.documentElement;
-            root.style.setProperty('--uese-bg-rgb', themeObj.bgRGB);
-            root.style.setProperty('--uese-text-rgb', themeObj.textRGB);
+            // bgRGB and textRGB are now permanently set in CSS for the dark glass theme
             root.style.setProperty('--uese-accent', themeObj.accent);
             root.style.setProperty('--uese-accent-sec', themeObj.accentSec || themeObj.accent);
             root.style.setProperty('--uese-accent-rgb', Utils.hexToRgb(themeObj.accent));
@@ -604,11 +586,11 @@
             this.els.wrapper.style.top = 'clamp(10px, 2vh, 40px)';
             Storage.resetPosition();
             this.showToast("Position Reset", "success");
-            this.positionHistoryPanel();
         },
 
         initDraggable(el, handle) {
             let startX, startY, initialX, initialY;
+
             const onMouseMove = (e) => {
                 if (!this.isDragging) return;
                 if (!this.rafTicking) {
@@ -624,12 +606,13 @@
 
                         el.style.left = `${newX}px`;
                         el.style.top = `${newY}px`;
-                        this.positionHistoryPanel();
+
                         this.rafTicking = false;
                     });
                     this.rafTicking = true;
                 }
             };
+
             const onMouseUp = () => {
                 if (!this.isDragging) return;
                 this.isDragging = false;
@@ -638,7 +621,7 @@
                 document.removeEventListener('touchmove', onMouseMove);
                 document.removeEventListener('touchend', onMouseUp);
 
-                el.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                el.style.transition = 'opacity 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease';
                 Storage.setPosition(parseInt(el.style.left, 10), parseInt(el.style.top, 10));
             };
 
@@ -669,29 +652,16 @@
 
                 if (e.type === 'mousedown') e.preventDefault();
             };
+
             handle.addEventListener('mousedown', onMouseDown);
             handle.addEventListener('touchstart', onMouseDown, { passive: true });
-        },
 
-        buildHistoryPanel() {
-            this.els.historyPanel = Utils.el('div', 'uese-history-panel uese-glass');
-            document.body.appendChild(this.els.historyPanel);
-            this.renderHistory();
-        },
-
-        positionHistoryPanel() {
-            const widgetRect = this.els.wrapper.getBoundingClientRect();
-            if (widgetRect.top > window.innerHeight / 2) {
-                this.els.historyPanel.style.top = 'auto';
-                this.els.historyPanel.style.bottom = `${window.innerHeight - widgetRect.top + 10}px`;
-            } else {
-                this.els.historyPanel.style.bottom = 'auto';
-                this.els.historyPanel.style.top = `${widgetRect.bottom + 10}px`;
-            }
-            let idealLeft = widgetRect.left + (widgetRect.width / 2) - (this.els.historyPanel.offsetWidth / 2);
-            idealLeft = Math.max(10, Math.min(idealLeft, window.innerWidth - this.els.historyPanel.offsetWidth - 10));
-            this.els.historyPanel.style.left = `${idealLeft}px`;
-            this.els.historyPanel.style.right = 'auto';
+            handle.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.resetPosition();
+                }
+            });
         },
 
         buildToast() {
@@ -699,115 +669,57 @@
             document.body.appendChild(this.els.toast);
         },
 
-        toggleHistory() {
-            const isOpen = this.els.historyPanel.classList.toggle('uese-open');
-            if (isOpen) {
-                this.positionHistoryPanel();
-                this.renderHistory();
-            }
-        },
-
-        renderHistory() {
-            while (this.els.historyPanel.firstChild) {
-                this.els.historyPanel.removeChild(this.els.historyPanel.firstChild);
-            }
-
-            const header = Utils.el('div', 'uese-history-header');
-            header.appendChild(Utils.el('span', '', 'Recent Extractions'));
-            this.els.historyPanel.appendChild(header);
-
-            if (State.history.length === 0) {
-                const empty = Utils.el('div', '', 'No recent data');
-                empty.style.cssText = 'opacity:0.5; font-size: 12px; text-align: center; padding: 10px;';
-                this.els.historyPanel.appendChild(empty);
-                return;
-            }
-
-            State.history.forEach(item => {
-                const row = Utils.el('div', 'uese-history-item');
-
-                const leftCol = Utils.el('div');
-                const title = Utils.el('div', '', `${item.tickets} Tix - ${item.revenue}`);
-                title.style.fontWeight = '500';
-
-                let domainText = 'Unknown';
-                try { domainText = new URL(item.url).hostname; } catch (e) {}
-
-                const domain = Utils.el('div', 'uese-history-domain', domainText);
-                leftCol.append(title, domain);
-
-                const rightCol = Utils.el('div', '', '📋');
-                rightCol.style.cssText = 'opacity:0.5; font-size: 16px; display:flex; align-items:center;';
-
-                row.append(leftCol, rightCol);
-                row.addEventListener('click', () => {
-                    Extractor.performClipboardWrite(item.rawString);
-                    this.showToast("Copied from history!", "success");
-                    this.toggleHistory();
-                });
-                this.els.historyPanel.appendChild(row);
-            });
-        },
-
         updateVisibility(visible) {
             this.ensureInDOM();
             if (visible) {
                 this.els.wrapper.classList.add('uese-visible');
-                this.positionHistoryPanel();
                 if (State.themeConfig) this.applyTheme(State.themeConfig);
             } else {
                 this.els.wrapper.classList.remove('uese-visible');
-                this.els.historyPanel.classList.remove('uese-open');
             }
         },
 
         updateStatus(state, tickets = 0, revenue = 0) {
             this.ensureInDOM();
-            if (this.els.statusIcon) this.els.statusIcon.remove();
 
-            // Reset indicator classes and text colors
             this.els.indicator.className = 'uese-indicator';
             this.els.statusText.style.color = '';
 
             if (state === 'scanning') {
+                this.els.refreshBtn.classList.add('uese-spin');
                 this.els.statusText.textContent = "Scanning...";
                 this.els.indicator.classList.add('scanning');
-                this.els.statusIcon = Utils.createSvgIcon("M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", "rgba(var(--uese-text-rgb), 0.5)");
-            } else if (state === 'not_found') {
-                this.els.statusText.textContent = "Not Found";
-                this.els.indicator.classList.add('red');
-                this.els.statusIcon = Utils.createSvgIcon("M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z", "#f59e0b");
-            } else if (state === 'found') {
-                const tVal = Utils.parseNum(tickets);
-                const rVal = Utils.parseNum(revenue);
+            } else {
+                this.els.refreshBtn.classList.remove('uese-spin');
 
-                let iconColor = "var(--uese-accent)";
-                let statusString = "";
-                let statusColor = "";
-
-                if (tVal === 0 && rVal === 0) {
+                if (state === 'not_found') {
+                    this.els.statusText.textContent = "Not Found";
                     this.els.indicator.classList.add('red');
-                    iconColor = "#ef4444";
-                    statusString = "No sales";
-                    statusColor = "#ef4444";
-                } else if (tVal > 0 && rVal === 0) {
-                    this.els.indicator.classList.add('yellow');
-                    iconColor = "#f59e0b";
-                    statusString = "Free tickets";
-                    statusColor = "#f59e0b";
-                } else {
-                    this.els.indicator.classList.add('green');
-                    iconColor = "#10b981";
-                    statusString = "With sales";
-                    statusColor = "#10b981";
+                } else if (state === 'found') {
+                    const tVal = Utils.parseNum(tickets);
+                    const rVal = Utils.parseNum(revenue);
+
+                    let statusString = "";
+                    let statusColor = "";
+
+                    if (tVal === 0 && rVal === 0) {
+                        this.els.indicator.classList.add('red');
+                        statusString = "No sales";
+                        statusColor = "#ef4444";
+                    } else if (tVal > 0 && rVal === 0) {
+                        this.els.indicator.classList.add('yellow');
+                        statusString = "Free tickets";
+                        statusColor = "#f59e0b";
+                    } else {
+                        this.els.indicator.classList.add('green');
+                        statusString = "With sales";
+                        statusColor = "#10b981";
+                    }
+
+                    this.els.statusText.textContent = statusString;
+                    this.els.statusText.style.color = statusColor;
                 }
-
-                this.els.statusText.textContent = statusString;
-                this.els.statusText.style.color = statusColor;
-                this.els.statusIcon = Utils.createSvgIcon("M5 13l4 4L19 7", iconColor);
             }
-
-            this.els.copyBtn.appendChild(this.els.statusIcon);
         },
 
         showToast(message, type = 'success') {
@@ -820,6 +732,7 @@
             const iconPath = type === 'success'
                 ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                 : "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
+
             this.els.toast.appendChild(Utils.createSvgIcon(iconPath, iconColor));
 
             const textSpan = Utils.el('span', '', message);
@@ -840,6 +753,7 @@
     const Extractor = {
         async executeCopy(asJson = false) {
             if (!State.activeModule) return;
+
             try {
                 const data = State.activeModule.extract();
                 const url = window.location.href;
@@ -847,16 +761,17 @@
                 let fourthCol = '0';
                 const tVal = Utils.parseNum(data.tickets);
                 const rVal = Utils.parseNum(data.revenue);
+
                 if (data.freeTickets !== undefined) fourthCol = data.freeTickets;
                 else if (tVal > 0 && rVal === 0) fourthCol = data.tickets;
-                else if (tVal > 0 && rVal > 0) fourthCol = 'check free tix';
+                else if (tVal > 0 && rVal > 0) fourthCol = CONFIG.DEFAULTS.TEXT_CHECK_FREE;
+
                 const exportData = { url, tickets: data.tickets, revenue: data.revenue, fourthCol, timestamp: Date.now() };
                 const rawString = `${url}\t${data.tickets}\t${data.revenue}\t${fourthCol}`;
                 const output = asJson ? JSON.stringify(exportData, null, 2) : rawString;
 
                 await this.performClipboardWrite(output);
-                exportData.rawString = rawString;
-                Storage.saveHistory(exportData);
+
                 UI.showToast(`Copied! ${data.tickets} tix - ${data.revenue}`, 'success');
                 UI.updateStatus('found', data.tickets, data.revenue);
             } catch (err) {
@@ -898,36 +813,57 @@
 
     const Observer = {
         domObserver: null,
+
         start() {
             if (!this.domObserver) {
                 this.domObserver = new MutationObserver(() => this.handleMutation());
             }
-            this.domObserver.observe(document.body, { childList: true, subtree: true });
+            this.updateObservationRoot();
             this.startPolling();
         },
+
+        updateObservationRoot() {
+            if (this.domObserver) this.domObserver.disconnect();
+
+            let targetRoot = document.body;
+            if (State.activeModule && State.activeModule.rootSelector) {
+                const specificRoot = document.querySelector(State.activeModule.rootSelector);
+                if (specificRoot) targetRoot = specificRoot;
+            }
+
+            State.observedRoot = targetRoot;
+            this.domObserver.observe(State.observedRoot, { childList: true, subtree: true });
+        },
+
         stop() {
             if (this.domObserver) {
                 this.domObserver.disconnect();
             }
             this.stopPolling();
         },
+
         stopPolling() {
             clearTimeout(State.scanTimer);
             clearTimeout(State.pollTimer);
         },
+
         handleMutation() {
             if (State.activeModule) UI.ensureInDOM();
             if (State.hasFetchedData) return;
+
             clearTimeout(State.scanTimer);
             State.scanTimer = setTimeout(() => this.scanPage(), CONFIG.DEBOUNCE_MS);
         },
+
         startPolling() {
             State.pollCount = 0;
             UI.updateStatus('scanning');
             this.schedulePoll();
         },
+
         schedulePoll() {
             if (State.hasFetchedData) return;
+
             if (State.pollCount >= CONFIG.POLL_MAX_ATTEMPTS) {
                 Logger.warn("Observer", "Poll limit reached. Data not found.");
                 UI.updateStatus('not_found');
@@ -945,15 +881,18 @@
                 }
             }, delay);
         },
+
         scanPage() {
             if (!State.activeModule) {
                 State.activeModule = siteModules.find(mod => State.currentUrl.includes(mod.domain) && mod.check());
-                if (State.activeModule && State.activeModule.theme) {
-                    State.themeConfig = State.activeModule.theme;
+                if (State.activeModule) {
+                    if (State.activeModule.theme) State.themeConfig = State.activeModule.theme;
+                    this.updateObservationRoot(); // Re-bind observer to specific root if found
                 }
             }
 
             UI.updateVisibility(!!State.activeModule);
+
             if (State.activeModule && !State.hasFetchedData) {
                 try {
                     const data = State.activeModule.extract();
@@ -979,6 +918,7 @@
                 try {
                     const oldUrl = new URL(State.currentUrl);
                     const newUrl = new URL(window.location.href);
+
                     if (oldUrl.pathname !== newUrl.pathname) {
                         App.resetAndScan();
                     } else {
@@ -988,10 +928,21 @@
                     App.resetAndScan();
                 }
             };
+
             const originalPush = history.pushState;
-            history.pushState = function() { originalPush.apply(this, arguments); handleNav(); };
+            history.pushState = function() {
+                const res = originalPush.apply(this, arguments);
+                handleNav();
+                return res;
+            };
+
             const originalReplace = history.replaceState;
-            history.replaceState = function() { originalReplace.apply(this, arguments); handleNav(); };
+            history.replaceState = function() {
+                const res = originalReplace.apply(this, arguments);
+                handleNav();
+                return res;
+            };
+
             window.addEventListener('popstate', handleNav);
         }
     };
@@ -1002,8 +953,7 @@
 
     const App = {
         init() {
-            Logger.log("Bootstrap", "Initializing Version 5.4");
-            Storage.init();
+            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.1'}`);
             UI.init();
             Router.init();
             Observer.start();
@@ -1013,11 +963,13 @@
             State.activeModule = null;
             State.hasFetchedData = false;
             if (force) UI.showToast("Re-scanning dashboard...", "success");
+
             Observer.stop();
             Observer.start();
             Observer.scanPage();
         }
     };
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => App.init());
     } else {
