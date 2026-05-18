@@ -2,7 +2,7 @@
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRDA0MTBDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJ2MjBtLTctN2w3IDcgNy03Ii8+PC9zdmc+
-// @version      6.2
+// @version      6.4
 // @description  Extracts ticket sales and revenue data from supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
@@ -209,7 +209,7 @@
             name: 'Posh',
             domain: 'posh.vip',
             rootSelector: '#__next, #root',
-            theme: { accent: '#111111', accentSec: '#333333' }, // Dark theme base to support white text on the floating bar
+            theme: { accent: '#FFFFFF', accentSec: '#FFFFFF' },
             check: () => !!document.querySelector('div.CrossSection__w3a2U'),
             extract: () => {
                 let ticketsSold = '', totalRevenue = CONFIG.DEFAULTS.REVENUE;
@@ -310,25 +310,34 @@
         injectStyles() {
             GM_addStyle(`
                 :root {
-                    /* White text is enforced to contrast with heavily colored backgrounds */
                     --uese-text-rgb: 245, 245, 245;
-
-                    /* Dynamic accents overwritten by applyTheme */
                     --uese-accent: #D0410C;
                     --uese-accent-rgb: 208, 65, 12;
 
-                    /* Background is now the accent color itself */
-                    --uese-glass-bg: rgba(var(--uese-accent-rgb), 0.85);
-                    --uese-glass-border: rgba(255, 255, 255, 0.15);
-                    --uese-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 10px 1px rgba(var(--uese-accent-rgb), 0.3);
+                    /* Deep, muted, professional "jewel" tones for background status */
+                    --status-rgb-scan: 30, 41, 59;       /* Dark Slate - Premium neutral */
+                    --status-rgb-green: 16, 75, 36;      /* Deep Forest Green */
+                    --status-rgb-yellow: 138, 62, 7;     /* Rich Bronze / Amber */
+                    --status-rgb-red: 136, 19, 55;       /* Deep Crimson / Rose */
+
+                    /* Default background color */
+                    --uese-current-bg-rgb: var(--status-rgb-scan);
                 }
+
+                /* Apply dynamic status colors to the widget */
+                .uese-widget.status-scanning { --uese-current-bg-rgb: var(--status-rgb-scan); }
+                .uese-widget.status-green    { --uese-current-bg-rgb: var(--status-rgb-green); }
+                .uese-widget.status-yellow   { --uese-current-bg-rgb: var(--status-rgb-yellow); }
+                .uese-widget.status-red      { --uese-current-bg-rgb: var(--status-rgb-red); }
+
                 .uese-glass {
-                    background: var(--uese-glass-bg);
+                    background: rgba(var(--uese-current-bg-rgb), 0.85);
                     backdrop-filter: blur(24px);
                     -webkit-backdrop-filter: blur(24px);
-                    border: 1px solid var(--uese-glass-border);
-                    box-shadow: var(--uese-glass-shadow);
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 10px 1px rgba(0, 0, 0, 0.2);
                     color: rgb(var(--uese-text-rgb));
+                    transition: background 0.4s ease, box-shadow 0.4s ease, opacity 0.3s ease, transform 0.3s ease;
                 }
                 .uese-widget {
                     position: fixed;
@@ -344,7 +353,6 @@
                     opacity: 0;
                     pointer-events: none;
                     transform: translateX(-50%) translateY(-10px);
-                    transition: opacity 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
                 }
                 .uese-widget.uese-visible {
                     opacity: 1;
@@ -359,24 +367,23 @@
                     padding: 0.5rem 0.25rem;
                     display: flex;
                     align-items: center;
-                    opacity: 0.8;
+                    opacity: 0.7;
                     color: white;
                     transition: all 0.2s;
                     border-radius: 6px;
                 }
                 .uese-drag-handle:hover, .uese-drag-handle:focus-visible {
                     opacity: 1;
-                    background: rgba(0, 0, 0, 0.15);
-                    outline: 1px solid rgba(255, 255, 255, 0.2);
+                    background: rgba(255, 255, 255, 0.08);
+                    outline: 1px solid rgba(255, 255, 255, 0.15);
                     outline-offset: 2px;
                 }
                 .uese-drag-handle:active { cursor: grabbing; }
 
                 .uese-btn {
-                    /* Dark translucent overlay to distinguish buttons from the colored background */
-                    background: rgba(0, 0, 0, 0.15);
+                    background: rgba(255, 255, 255, 0.06);
                     color: rgb(var(--uese-text-rgb));
-                    border: 1px solid rgba(0, 0, 0, 0.2);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
                     padding: 0.6rem 1rem;
                     border-radius: 10px;
                     font-weight: 600;
@@ -390,7 +397,7 @@
                     position: relative;
                 }
                 .uese-btn:hover, .uese-btn:focus-visible {
-                    background: rgba(0, 0, 0, 0.25);
+                    background: rgba(255, 255, 255, 0.12);
                     border-color: rgba(255, 255, 255, 0.2);
                     color: #ffffff;
                     outline: none;
@@ -412,52 +419,38 @@
                     animation: uese-spin 1s linear infinite;
                 }
 
-                /* A dark inner pill to house the status indicator so the color logic works securely against ANY background */
+                /* Pill background provides subtle separation */
                 .uese-status-pill {
                     display: flex;
                     align-items: center;
                     gap: 0.5rem;
-                    background: rgba(0, 0, 0, 0.2);
+                    background: rgba(0, 0, 0, 0.25);
                     padding: 0.25rem 0.6rem;
                     border-radius: 8px;
-                    border: 1px solid rgba(0, 0, 0, 0.1);
+                    border: 1px solid rgba(0, 0, 0, 0.15);
                 }
                 .uese-status-text {
-                    color: #ffffff; /* Keep text white for maximum contrast inside the dark pill */
+                    color: #ffffff;
                     transition: color 0.3s ease;
                 }
 
+                /* The indicator is now ALWAYS the site's accent color */
                 .uese-indicator {
                     width: 10px;
                     height: 10px;
                     border-radius: 50%;
-                    background-color: var(--indicator-color, #888);
-                    box-shadow: 0 0 6px var(--indicator-color, transparent), inset 0 0 2px rgba(0,0,0,0.5);
-                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    background-color: var(--uese-accent);
+                    box-shadow: 0 0 6px var(--uese-accent), inset 0 0 2px rgba(0,0,0,0.5);
+                    border: 1px solid rgba(255, 255, 255, 0.4);
                     transition: all 0.3s ease;
                     flex-shrink: 0;
                 }
-                .uese-indicator.green {
-                    --indicator-color: #10b981;
-                    border-color: #a7f3d0;
-                }
-                .uese-indicator.yellow {
-                    --indicator-color: #f59e0b;
-                    border-color: #fde68a;
-                    background-color: var(--indicator-color);
-                }
-                .uese-indicator.red {
-                    --indicator-color: #ef4444;
-                    border-radius: 50%;
-                    border-color: #fecaca;
-                }
                 .uese-indicator.scanning {
-                    --indicator-color: #3b82f6;
-                    animation: uese-pulse 1.5s infinite;
+                    animation: uese-pulse-accent 1.5s infinite;
                 }
-                @keyframes uese-pulse {
-                    0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--indicator-color); transform: scale(1); }
-                    50% { opacity: 1; box-shadow: 0 0 10px var(--indicator-color); transform: scale(1.1); }
+                @keyframes uese-pulse-accent {
+                    0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--uese-accent); transform: scale(1); }
+                    50% { opacity: 1; box-shadow: 0 0 10px var(--uese-accent); transform: scale(1.1); }
                 }
 
                 .uese-tooltip {
@@ -504,6 +497,12 @@
                     display: flex;
                     align-items: center;
                     gap: 0.75rem;
+                    background: rgba(20, 20, 20, 0.95);
+                    backdrop-filter: blur(12px);
+                    -webkit-backdrop-filter: blur(12px);
+                    color: #fff;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
                 }
                 .uese-toast.uese-show {
                     opacity: 1;
@@ -513,7 +512,8 @@
         },
 
         buildWidget() {
-            this.els.wrapper = Utils.el('div', 'uese-widget uese-glass');
+            // Start with the scanning status as default
+            this.els.wrapper = Utils.el('div', 'uese-widget uese-glass status-scanning');
 
             this.els.dragHandle = Utils.el('div', 'uese-drag-handle');
             this.els.dragHandle.title = 'Drag to move (Double-Click to Reset)';
@@ -524,7 +524,6 @@
             this.els.copyBtn = Utils.el('button', 'uese-btn');
             this.els.copyBtn.setAttribute('aria-label', 'Copy Extracted Data');
 
-            // Wrap Indicator and Status Text in a pill container
             this.els.statusPill = Utils.el('div', 'uese-status-pill');
 
             // 1. Indicator
@@ -633,13 +632,13 @@
                 document.removeEventListener('mouseup', onMouseUp);
                 document.removeEventListener('touchmove', onMouseMove);
                 document.removeEventListener('touchend', onMouseUp);
-                el.style.transition = 'opacity 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease';
+                el.style.transition = 'background 0.4s ease, box-shadow 0.4s ease, opacity 0.3s ease, transform 0.3s ease';
                 Storage.setPosition(parseInt(el.style.left, 10), parseInt(el.style.top, 10));
             };
 
             const onMouseDown = (e) => {
                 this.isDragging = true;
-                el.style.transition = 'none';
+                el.style.transition = 'background 0.4s ease, box-shadow 0.4s ease'; // keep bg transitions, strip transform
 
                 if (!el.classList.contains('uese-dragged')) {
                     const rect = el.getBoundingClientRect();
@@ -677,7 +676,7 @@
         },
 
         buildToast() {
-            this.els.toast = Utils.el('div', 'uese-toast uese-glass');
+            this.els.toast = Utils.el('div', 'uese-toast');
             document.body.appendChild(this.els.toast);
         },
 
@@ -693,30 +692,34 @@
 
         updateStatus(state, tickets = 0, revenue = 0) {
             this.ensureInDOM();
-            this.els.indicator.className = 'uese-indicator';
+
+            // Clean up previous status classes on the widget background
+            this.els.wrapper.classList.remove('status-scanning', 'status-green', 'status-yellow', 'status-red');
+            this.els.indicator.className = 'uese-indicator'; // Reset indicator classes
 
             if (state === 'scanning') {
                 this.els.refreshBtn.classList.add('uese-spin');
                 this.els.statusText.textContent = "Scanning...";
-                this.els.indicator.classList.add('scanning');
+                this.els.wrapper.classList.add('status-scanning');
+                this.els.indicator.classList.add('scanning'); // Re-adds pulse animation
             } else {
                 this.els.refreshBtn.classList.remove('uese-spin');
                 if (state === 'not_found') {
                     this.els.statusText.textContent = "Not Found";
-                    this.els.indicator.classList.add('red');
+                    this.els.wrapper.classList.add('status-red');
                 } else if (state === 'found') {
                     const tVal = Utils.parseNum(tickets);
                     const rVal = Utils.parseNum(revenue);
 
                     let statusString = "";
                     if (tVal === 0 && rVal === 0) {
-                        this.els.indicator.classList.add('red');
+                        this.els.wrapper.classList.add('status-red');
                         statusString = "No sales";
                     } else if (tVal > 0 && rVal === 0) {
-                        this.els.indicator.classList.add('yellow');
+                        this.els.wrapper.classList.add('status-yellow');
                         statusString = "Free tickets";
                     } else {
-                        this.els.indicator.classList.add('green');
+                        this.els.wrapper.classList.add('status-green');
                         statusString = "With sales";
                     }
 
@@ -731,8 +734,7 @@
                 this.els.toast.removeChild(this.els.toast.firstChild);
             }
 
-            // Using white icons ensures it's readable over the primary colored accent background
-            const iconColor = '#ffffff';
+            const iconColor = type === 'success' ? 'var(--uese-accent)' : '#ef4444';
             const iconPath = type === 'success'
                 ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                 : "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
@@ -742,7 +744,8 @@
             const textSpan = Utils.el('span', '', message);
             this.els.toast.appendChild(textSpan);
 
-            this.els.toast.style.borderLeft = `4px solid rgba(255, 255, 255, 0.5)`;
+            // Use the site's accent color for the border highlight of the toast
+            this.els.toast.style.borderLeft = `4px solid ${iconColor}`;
             this.els.toast.classList.add('uese-show');
 
             clearTimeout(this.toastTimer);
@@ -954,7 +957,7 @@
 
     const App = {
         init() {
-            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.2'}`);
+            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.4'}`);
             UI.init();
             Router.init();
             Observer.start();
