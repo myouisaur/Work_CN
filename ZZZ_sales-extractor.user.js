@@ -2,7 +2,7 @@
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRDA0MTBDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJ2MjBtLTctN2w3IDcgNy03Ii8+PC9zdmc+
-// @version      6.1
+// @version      6.2
 // @description  Extracts ticket sales and revenue data from supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
@@ -70,12 +70,14 @@
     const Storage = {
         get(key, def) {
             try {
-                return typeof GM_getValue !== 'undefined' ? GM_getValue(key, def) : (JSON.parse(localStorage.getItem(key)) ?? def);
+                return typeof GM_getValue !== 'undefined' ?
+                    GM_getValue(key, def) : (JSON.parse(localStorage.getItem(key)) ?? def);
             } catch { return def; }
         },
         set(key, val) {
             try {
-                typeof GM_setValue !== 'undefined' ? GM_setValue(key, val) : localStorage.setItem(key, JSON.stringify(val));
+                typeof GM_setValue !== 'undefined' ?
+                    GM_setValue(key, val) : localStorage.setItem(key, JSON.stringify(val));
             } catch { /* Ignore gracefully */ }
         },
         getPosition() {
@@ -146,7 +148,7 @@
             name: 'Eventbrite',
             domain: 'eventbrite.com',
             rootSelector: '#root, main',
-            theme: { accent: '#D0410C', accentSec: '#3D64FF' },
+            theme: { accent: '#D0410C', accentSec: '#D0410C' },
             check: () => {
                 try {
                     const exactMatch = document.evaluate(`//*[not(*) and normalize-space(text())='${CONFIG.DEFAULTS.TEXT_SOLD}']`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
@@ -156,7 +158,6 @@
             },
             extract: () => {
                 let ticketsSold = '', netSales = '', freeTickets = undefined;
-
                 const findCard = (targetText) => {
                     const targetNode = document.evaluate(`//*[not(*) and normalize-space(text())='${targetText}']`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
                     if (!targetNode) return null;
@@ -208,7 +209,7 @@
             name: 'Posh',
             domain: 'posh.vip',
             rootSelector: '#__next, #root',
-            theme: { accent: '#FFFFFF', accentSec: '#FFFFFF' },
+            theme: { accent: '#111111', accentSec: '#333333' }, // Dark theme base to support white text on the floating bar
             check: () => !!document.querySelector('div.CrossSection__w3a2U'),
             extract: () => {
                 let ticketsSold = '', totalRevenue = CONFIG.DEFAULTS.REVENUE;
@@ -244,7 +245,7 @@
             name: 'Seetickets / Eventim',
             domain: 'eventim.us',
             rootSelector: 'body',
-            theme: { accent: '#0C9A9A', accentSec: '#001926' },
+            theme: { accent: '#0C9A9A', accentSec: '#0C9A9A' },
             check: () => !!document.querySelector('#table table'),
             extract: () => {
                 const dataRow = document.querySelectorAll('#table table tr')[1];
@@ -277,7 +278,7 @@
             name: 'Tickeri',
             domain: 'tickeri.com',
             rootSelector: 'body',
-            theme: { accent: '#EB0045', accentSec: '#000000' },
+            theme: { accent: '#EB0045', accentSec: '#EB0045' },
             check: () => document.body.innerText.includes('Ticket Inventory'),
             extract: () => {
                 let tickets = CONFIG.DEFAULTS.TICKETS, revenue = CONFIG.DEFAULTS.REVENUE;
@@ -309,19 +310,17 @@
         injectStyles() {
             GM_addStyle(`
                 :root {
-                    /* Hardcoded dark mode constants */
-                    --uese-bg-rgb: 20, 20, 20;
+                    /* White text is enforced to contrast with heavily colored backgrounds */
                     --uese-text-rgb: 245, 245, 245;
 
                     /* Dynamic accents overwritten by applyTheme */
                     --uese-accent: #D0410C;
-                    --uese-accent-sec: #3D64FF;
                     --uese-accent-rgb: 208, 65, 12;
-                    --uese-accent-sec-rgb: 61, 100, 255;
 
-                    --uese-glass-bg: rgba(var(--uese-bg-rgb), 0.85);
-                    --uese-glass-border: rgba(var(--uese-accent-rgb), 0.6);
-                    --uese-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), 0 0 10px 1px rgba(var(--uese-accent-rgb), 0.4);
+                    /* Background is now the accent color itself */
+                    --uese-glass-bg: rgba(var(--uese-accent-rgb), 0.85);
+                    --uese-glass-border: rgba(255, 255, 255, 0.15);
+                    --uese-glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), 0 0 10px 1px rgba(var(--uese-accent-rgb), 0.3);
                 }
                 .uese-glass {
                     background: var(--uese-glass-bg);
@@ -360,22 +359,24 @@
                     padding: 0.5rem 0.25rem;
                     display: flex;
                     align-items: center;
-                    opacity: 0.6;
-                    transition: opacity 0.2s, color 0.2s;
+                    opacity: 0.8;
+                    color: white;
+                    transition: all 0.2s;
                     border-radius: 6px;
                 }
                 .uese-drag-handle:hover, .uese-drag-handle:focus-visible {
                     opacity: 1;
-                    color: var(--uese-accent);
-                    outline: 2px solid var(--uese-accent);
+                    background: rgba(0, 0, 0, 0.15);
+                    outline: 1px solid rgba(255, 255, 255, 0.2);
                     outline-offset: 2px;
                 }
                 .uese-drag-handle:active { cursor: grabbing; }
 
                 .uese-btn {
-                    background: rgba(255, 255, 255, 0.05);
+                    /* Dark translucent overlay to distinguish buttons from the colored background */
+                    background: rgba(0, 0, 0, 0.15);
                     color: rgb(var(--uese-text-rgb));
-                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(0, 0, 0, 0.2);
                     padding: 0.6rem 1rem;
                     border-radius: 10px;
                     font-weight: 600;
@@ -389,13 +390,13 @@
                     position: relative;
                 }
                 .uese-btn:hover, .uese-btn:focus-visible {
-                    background: rgba(var(--uese-accent-sec-rgb), 0.15);
-                    border-color: rgba(var(--uese-accent-sec-rgb), 0.4);
-                    color: var(--uese-accent-sec);
+                    background: rgba(0, 0, 0, 0.25);
+                    border-color: rgba(255, 255, 255, 0.2);
+                    color: #ffffff;
                     outline: none;
                 }
                 .uese-btn:hover svg, .uese-btn:focus-visible svg {
-                    stroke: var(--uese-accent-sec);
+                    stroke: #ffffff;
                 }
                 .uese-btn:active {
                     transform: scale(0.96);
@@ -411,7 +412,18 @@
                     animation: uese-spin 1s linear infinite;
                 }
 
+                /* A dark inner pill to house the status indicator so the color logic works securely against ANY background */
+                .uese-status-pill {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    background: rgba(0, 0, 0, 0.2);
+                    padding: 0.25rem 0.6rem;
+                    border-radius: 8px;
+                    border: 1px solid rgba(0, 0, 0, 0.1);
+                }
                 .uese-status-text {
+                    color: #ffffff; /* Keep text white for maximum contrast inside the dark pill */
                     transition: color 0.3s ease;
                 }
 
@@ -420,24 +432,24 @@
                     height: 10px;
                     border-radius: 50%;
                     background-color: var(--indicator-color, #888);
-                    box-shadow: 0 0 6px var(--indicator-color, transparent);
-                    border: 2px solid transparent;
+                    box-shadow: 0 0 6px var(--indicator-color, transparent), inset 0 0 2px rgba(0,0,0,0.5);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
                     transition: all 0.3s ease;
                     flex-shrink: 0;
                 }
                 .uese-indicator.green {
                     --indicator-color: #10b981;
-                    border-color: #047857;
+                    border-color: #a7f3d0;
                 }
                 .uese-indicator.yellow {
                     --indicator-color: #f59e0b;
-                    border-color: #b45309;
-                    border-style: dashed;
-                    background-color: transparent;
+                    border-color: #fde68a;
+                    background-color: var(--indicator-color);
                 }
                 .uese-indicator.red {
                     --indicator-color: #ef4444;
-                    border-radius: 2px; /* Square shape for error */
+                    border-radius: 50%;
+                    border-color: #fecaca;
                 }
                 .uese-indicator.scanning {
                     --indicator-color: #3b82f6;
@@ -453,8 +465,8 @@
                     top: calc(100% + 10px);
                     left: 50%;
                     transform: translateX(-50%);
-                    background: rgb(var(--uese-text-rgb));
-                    color: rgb(var(--uese-bg-rgb));
+                    background: #ffffff;
+                    color: #000000;
                     padding: 6px 12px;
                     border-radius: 6px;
                     font-size: 12px;
@@ -463,7 +475,7 @@
                     opacity: 0;
                     pointer-events: none;
                     transition: opacity 0.2s ease, transform 0.2s ease;
-                    border: 1px solid var(--uese-glass-border);
+                    border: 1px solid rgba(0, 0, 0, 0.1);
                     box-shadow: 0 4px 12px rgba(0,0,0,0.2);
                     z-index: 10;
                 }
@@ -512,15 +524,20 @@
             this.els.copyBtn = Utils.el('button', 'uese-btn');
             this.els.copyBtn.setAttribute('aria-label', 'Copy Extracted Data');
 
+            // Wrap Indicator and Status Text in a pill container
+            this.els.statusPill = Utils.el('div', 'uese-status-pill');
+
             // 1. Indicator
             this.els.indicator = Utils.el('div', 'uese-indicator scanning');
-            this.els.copyBtn.appendChild(this.els.indicator);
+            this.els.statusPill.appendChild(this.els.indicator);
 
             // 2. Status Text
             this.els.statusText = Utils.el('span', 'uese-status-text', 'Scanning...');
-            this.els.copyBtn.appendChild(this.els.statusText);
+            this.els.statusPill.appendChild(this.els.statusText);
 
-            // 3. Copy Icon (moved to replace the checkmark)
+            this.els.copyBtn.appendChild(this.els.statusPill);
+
+            // 3. Copy Icon
             this.els.copyIcon = Utils.createSvgIcon("M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3");
             this.els.copyBtn.appendChild(this.els.copyIcon);
 
@@ -540,7 +557,6 @@
             this.els.copyBtn.addEventListener('click', (e) => Extractor.executeCopy(e.shiftKey));
             this.els.refreshBtn.addEventListener('click', () => App.resetAndScan(true));
             this.els.dragHandle.addEventListener('dblclick', () => this.resetPosition());
-
             this.els.copyBtn.addEventListener('mouseenter', (e) => {
                 const rect = e.target.getBoundingClientRect();
                 if (window.innerHeight - rect.bottom < 60) {
@@ -562,11 +578,8 @@
         applyTheme(themeObj) {
             if (!themeObj) return;
             const root = document.documentElement;
-            // bgRGB and textRGB are now permanently set in CSS for the dark glass theme
             root.style.setProperty('--uese-accent', themeObj.accent);
-            root.style.setProperty('--uese-accent-sec', themeObj.accentSec || themeObj.accent);
             root.style.setProperty('--uese-accent-rgb', Utils.hexToRgb(themeObj.accent));
-            root.style.setProperty('--uese-accent-sec-rgb', Utils.hexToRgb(themeObj.accentSec || themeObj.accent));
         },
 
         loadSafePosition() {
@@ -620,7 +633,6 @@
                 document.removeEventListener('mouseup', onMouseUp);
                 document.removeEventListener('touchmove', onMouseMove);
                 document.removeEventListener('touchend', onMouseUp);
-
                 el.style.transition = 'opacity 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease';
                 Storage.setPosition(parseInt(el.style.left, 10), parseInt(el.style.top, 10));
             };
@@ -681,9 +693,7 @@
 
         updateStatus(state, tickets = 0, revenue = 0) {
             this.ensureInDOM();
-
             this.els.indicator.className = 'uese-indicator';
-            this.els.statusText.style.color = '';
 
             if (state === 'scanning') {
                 this.els.refreshBtn.classList.add('uese-spin');
@@ -691,7 +701,6 @@
                 this.els.indicator.classList.add('scanning');
             } else {
                 this.els.refreshBtn.classList.remove('uese-spin');
-
                 if (state === 'not_found') {
                     this.els.statusText.textContent = "Not Found";
                     this.els.indicator.classList.add('red');
@@ -700,24 +709,18 @@
                     const rVal = Utils.parseNum(revenue);
 
                     let statusString = "";
-                    let statusColor = "";
-
                     if (tVal === 0 && rVal === 0) {
                         this.els.indicator.classList.add('red');
                         statusString = "No sales";
-                        statusColor = "#ef4444";
                     } else if (tVal > 0 && rVal === 0) {
                         this.els.indicator.classList.add('yellow');
                         statusString = "Free tickets";
-                        statusColor = "#f59e0b";
                     } else {
                         this.els.indicator.classList.add('green');
                         statusString = "With sales";
-                        statusColor = "#10b981";
                     }
 
                     this.els.statusText.textContent = statusString;
-                    this.els.statusText.style.color = statusColor;
                 }
             }
         },
@@ -728,7 +731,8 @@
                 this.els.toast.removeChild(this.els.toast.firstChild);
             }
 
-            const iconColor = type === 'success' ? 'var(--uese-accent)' : '#ef4444';
+            // Using white icons ensures it's readable over the primary colored accent background
+            const iconColor = '#ffffff';
             const iconPath = type === 'success'
                 ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                 : "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
@@ -738,7 +742,7 @@
             const textSpan = Utils.el('span', '', message);
             this.els.toast.appendChild(textSpan);
 
-            this.els.toast.style.borderLeft = `4px solid ${iconColor}`;
+            this.els.toast.style.borderLeft = `4px solid rgba(255, 255, 255, 0.5)`;
             this.els.toast.classList.add('uese-show');
 
             clearTimeout(this.toastTimer);
@@ -824,7 +828,6 @@
 
         updateObservationRoot() {
             if (this.domObserver) this.domObserver.disconnect();
-
             let targetRoot = document.body;
             if (State.activeModule && State.activeModule.rootSelector) {
                 const specificRoot = document.querySelector(State.activeModule.rootSelector);
@@ -863,7 +866,6 @@
 
         schedulePoll() {
             if (State.hasFetchedData) return;
-
             if (State.pollCount >= CONFIG.POLL_MAX_ATTEMPTS) {
                 Logger.warn("Observer", "Poll limit reached. Data not found.");
                 UI.updateStatus('not_found');
@@ -892,7 +894,6 @@
             }
 
             UI.updateVisibility(!!State.activeModule);
-
             if (State.activeModule && !State.hasFetchedData) {
                 try {
                     const data = State.activeModule.extract();
@@ -953,7 +954,7 @@
 
     const App = {
         init() {
-            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.1'}`);
+            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.2'}`);
             UI.init();
             Router.init();
             Observer.start();
