@@ -2,8 +2,8 @@
 // @name         [Boletos Express] Mass Duplicator
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://www.boletosexpress.com/favicon.ico
-// @version      1.8
-// @description  Automates multi-tab event duplication with custom date insertion, dynamic presenter validation, and automated field cleanup.
+// @version      2.0
+// @description  Automates multi-tab event duplication with custom date insertion, side-by-side line verification parsing, and automated field cleanup.
 // @author       Xiv
 // @match        *://*.boletosexpress.com/promoters/*
 // @noframes
@@ -35,7 +35,7 @@
             success: '#10b981',
             errorBg: '#fef2f2',
             errorBorder: '#ef4444',
-            neutralBg: '#f8f9fa',
+            neutralBg: '#fafafa',
             neutralHover: '#eeeff2',
             textPrimary: '#1f2937',
             textSecondary: '#4b5563',
@@ -87,19 +87,28 @@
             if (parts.length < 2) return null;
 
             let m, d, y;
-            if (isNaN(parts[0])) m = this._monthsMap[parts[0]];
-            else m = parseInt(parts[0], 10);
 
-            d = parseInt(parts[1], 10);
-            if (parts.length >= 3) {
-                y = parseInt(parts[2], 10);
-                if (y < 100) y += 2000;
+            if (parts[0].length === 4 && !isNaN(parts[0])) {
+                y = parseInt(parts[0], 10);
+                m = isNaN(parts[1]) ? this._monthsMap[parts[1]] : parseInt(parts[1], 10);
+                d = parseInt(parts[2], 10);
             } else {
-                y = fallbackYear || this.getNYToday().getFullYear();
+                m = isNaN(parts[0]) ? this._monthsMap[parts[0]] : parseInt(parts[0], 10);
+                d = parseInt(parts[1], 10);
+                if (parts.length >= 3) {
+                    y = parseInt(parts[2], 10);
+                    if (y < 100) y += 2000;
+                } else {
+                    y = fallbackYear || this.getNYToday().getFullYear();
+                }
             }
 
             if (!m || isNaN(d) || isNaN(y) || m < 1 || m > 12 || d < 1 || d > 31) return null;
-            return new Date(y, m - 1, d);
+
+            const verifiedDate = new Date(y, m - 1, d);
+            if (verifiedDate.getFullYear() !== y || verifiedDate.getMonth() !== m - 1 || verifiedDate.getDate() !== d) return null;
+
+            return verifiedDate;
         },
 
         formatForBoletos(dateObj) {
@@ -107,6 +116,14 @@
             const dd = String(dateObj.getDate()).padStart(2, '0');
             const yyyy = dateObj.getFullYear();
             return `${yyyy}-${mm}-${dd}`;
+        },
+
+        formatToVerificationString(dateObj) {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const mmm = months[dateObj.getMonth()];
+            const dd = String(dateObj.getDate()).padStart(2, '0');
+            const yyyy = dateObj.getFullYear();
+            return `${mmm} ${dd}, ${yyyy}`;
         }
     };
 
@@ -124,7 +141,7 @@
 
                 .bx-md-modal {
                     background: #ffffff; padding: 1.75rem;
-                    border-radius: 1rem; width: 100%; max-width: 30rem;
+                    border-radius: 1rem; width: 100%; max-width: 46rem; /* Expanded to scale side-by-side items comfortably */
                     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
                     transform: translateY(1rem) scale(0.98);
                     transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -136,17 +153,35 @@
                 .bx-md-title { margin: 0 0 0.375rem 0; font-size: 1.5rem; color: ${CONFIG.COLORS.textPrimary}; font-weight: 700; letter-spacing: -0.02em; }
                 .bx-md-text { margin: 0 0 1.25rem 0; font-size: 0.95rem; color: ${CONFIG.COLORS.textSecondary}; line-height: 1.5; }
 
+                /* Layout Container Layer to hold Input and Preview side-by-side */
+                .bx-md-split-container {
+                    display: flex; gap: 1rem; width: 100%; margin-bottom: 0.75rem; align-items: stretch; box-sizing: border-box;
+                }
+
                 .bx-md-textarea {
-                    width: 100%; padding: 0.875rem; font-size: 1rem; color: ${CONFIG.COLORS.textPrimary};
-                    border: 1px solid ${CONFIG.COLORS.borderDefault}; border-radius: 0.625rem; box-sizing: border-box; margin-bottom: 0.375rem;
-                    min-height: 8.75rem; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-                    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-                    background: #fafafa;
+                    flex: 1; width: 50%; padding: 0.875rem; font-size: 0.95rem; color: ${CONFIG.COLORS.textPrimary};
+                    border: 1px solid ${CONFIG.COLORS.borderDefault}; border-radius: 0.625rem; box-sizing: border-box; margin-bottom: 0;
+                    min-height: 10rem; height: 10rem; resize: none; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                    transition: border-color 0.15s ease, box-shadow 0.15s ease; background: #fafafa;
                 }
                 .bx-md-textarea:focus { outline: none; border-color: ${CONFIG.COLORS.brand}; box-shadow: 0 0 0 4px rgba(28, 42, 124, 0.12); background: #ffffff; }
 
+                .bx-md-preview-wrapper {
+                    flex: 1; width: 50%; border: 1px solid #e5e7eb; border-radius: 0.625rem; background: #f9fafb;
+                    padding: 0.75rem; min-height: 10rem; height: 10rem; max-height: 10rem; overflow-y: auto; margin-bottom: 0;
+                    box-sizing: border-box; display: flex; flex-direction: column; gap: 0.375rem;
+                }
+                .bx-md-preview-line {
+                    display: flex; justify-content: space-between; align-items: center;
+                    font-size: 0.85rem; font-family: ui-monospace, SFMono-Regular, monospace; line-height: 1.4;
+                }
+                .bx-md-preview-input { color: ${CONFIG.COLORS.textSecondary}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+                .bx-md-preview-output { font-weight: 600; text-align: right; }
+                .bx-md-preview-line.status-valid .bx-md-preview-output { color: #059669; }
+                .bx-md-preview-line.status-invalid .bx-md-preview-output { color: #dc2626; font-weight: 500; }
+
                 .bx-md-feedback { font-size: 0.88rem; min-height: 1.25rem; margin-bottom: 1.5rem; display: inline-flex; align-items: center; gap: 0.375rem; padding: 0.375rem 0.75rem; border-radius: 0.375rem; width: 100%; box-sizing: border-box; }
-                .bx-md-feedback-neutral { color: ${CONFIG.COLORS.textSecondary}; background: ${CONFIG.COLORS.neutralBg}; border: 1px solid #e5e7eb; }
+                .bx-md-feedback-neutral { color: ${CONFIG.COLORS.textSecondary}; background: #f3f4f6; border: 1px solid #e5e7eb; }
                 .bx-md-feedback-success { color: #065f46; background: #ecfdf5; border: 1px solid #a7f3d0; font-weight: 500; }
                 .bx-md-feedback-error { color: #991b1b; background: #fef2f2; border: 1px solid #fca5a5; font-weight: 500; }
 
@@ -164,7 +199,7 @@
                 .bx-md-btn-primary:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; box-shadow: none; border-color: transparent; }
 
                 .bx-md-btn-secondary { background: #ffffff; color: ${CONFIG.COLORS.textPrimary}; border-color: ${CONFIG.COLORS.borderDefault}; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-                .bx-md-btn-secondary:hover:not(:disabled) { background: ${CONFIG.COLORS.neutralBg}; border-color: #b3b7bd; }
+                .bx-md-btn-secondary:hover:not(:disabled) { background: #f9fafb; border-color: #b3b7bd; }
 
                 .bx-md-btn-cancel { background: #ffffff; color: #ef4444; border-color: transparent; }
                 .bx-md-btn-cancel:hover:not(:disabled) { background: #fef2f2; color: #b91c1c; }
@@ -220,7 +255,12 @@
                 const overlay = ElementBuilder.create('div', { className: 'bx-md-overlay' });
                 const titleText = ElementBuilder.create('h3', { className: 'bx-md-title' }, 'Mass Duplicate Event');
                 const desc = ElementBuilder.create('p', { className: 'bx-md-text' }, `Enter target dates for Event ID: ${eventId}. One date per line.`);
-                const textarea = ElementBuilder.create('textarea', { className: 'bx-md-textarea', placeholder: "7.4\n8/15\nOct 31\nJan 1 2027" });
+
+                const textarea = ElementBuilder.create('textarea', { className: 'bx-md-textarea', placeholder: "2026-06-20\n7.4\n8/15\nOct 31" });
+                const previewWrapper = ElementBuilder.create('div', { className: 'bx-md-preview-wrapper' });
+
+                // Row wrapping layer to group components in a side-by-side left/right orientation
+                const splitContainer = ElementBuilder.create('div', { className: 'bx-md-split-container' }, textarea, previewWrapper);
 
                 const feedbackBar = ElementBuilder.create('div', { className: 'bx-md-feedback bx-md-feedback-neutral' }, 'Waiting for input...');
 
@@ -229,16 +269,18 @@
                 const btnConfirm = ElementBuilder.create('button', { type: 'button', className: 'bx-md-btn bx-md-btn-primary', disabled: true }, 'Duplicate');
 
                 const actions = ElementBuilder.create('div', { className: 'bx-md-actions' }, btnStandard, btnCancel, btnConfirm);
-                const modal = ElementBuilder.create('div', { className: 'bx-md-modal', role: 'dialog', 'aria-modal': 'true' }, titleText, desc, textarea, feedbackBar, actions);
+                const modal = ElementBuilder.create('div', { className: 'bx-md-modal', role: 'dialog', 'aria-modal': 'true' }, titleText, desc, splitContainer, feedbackBar, actions);
 
                 overlay.appendChild(modal);
                 document.body.appendChild(overlay);
 
                 const nyToday = DateEngine.getNYToday();
-                const fallbackYear = nyToday.getFullYear(); // Optimized: Cached once per validation lifecycle run
+                const fallbackYear = nyToday.getFullYear();
 
                 const validateLiveInput = () => {
+                    previewWrapper.textContent = '';
                     const lines = textarea.value.split('\n').map(l => l.trim()).filter(l => l);
+
                     if (lines.length === 0) {
                         feedbackBar.textContent = 'Waiting for input...';
                         feedbackBar.className = 'bx-md-feedback bx-md-feedback-neutral';
@@ -253,38 +295,48 @@
                     }
 
                     const validDates = [];
+                    let containsErrors = false;
+
                     for (let i = 0; i < lines.length; i++) {
                         const dateObj = DateEngine.parseFlexibleDate(lines[i], fallbackYear);
+                        const lineElement = ElementBuilder.create('div', { className: 'bx-md-preview-line' });
+                        const inputSpan = ElementBuilder.create('span', { className: 'bx-md-preview-input' }, lines[i]);
+                        const outputSpan = ElementBuilder.create('span', { className: 'bx-md-preview-output' });
+
+                        lineElement.appendChild(inputSpan);
+                        lineElement.appendChild(outputSpan);
+
                         if (!dateObj || isNaN(dateObj.getTime())) {
-                            // Security: Enforced strict DOM node construction to mitigate Reflected XSS risks
-                            feedbackBar.textContent = '';
-                            feedbackBar.className = 'bx-md-feedback bx-md-feedback-error';
-                            feedbackBar.appendChild(document.createTextNode('⚠️ '));
-                            feedbackBar.appendChild(ElementBuilder.create('strong', {}, `Line ${i + 1}:`));
-                            feedbackBar.appendChild(document.createTextNode(` Invalid format ("${lines[i]}")`));
-                            btnConfirm.disabled = true;
-                            return null;
+                            lineElement.classList.add('status-invalid');
+                            outputSpan.textContent = '✕ Invalid format';
+                            containsErrors = true;
+                        } else {
+                            const dayMidnight = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+                            if (dayMidnight < nyToday) {
+                                lineElement.classList.add('status-invalid');
+                                outputSpan.textContent = '✕ Past date';
+                                containsErrors = true;
+                            } else {
+                                lineElement.classList.add('status-valid');
+                                outputSpan.textContent = `✓ ${DateEngine.formatToVerificationString(dateObj)}`;
+                                validDates.push({ string: DateEngine.formatForBoletos(dateObj), timestamp: dateObj.getTime() });
+                            }
                         }
+                        previewWrapper.appendChild(lineElement);
+                    }
 
-                        const dayMidnight = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-                        if (dayMidnight < nyToday) {
-                            feedbackBar.textContent = '';
-                            feedbackBar.className = 'bx-md-feedback bx-md-feedback-error';
-                            feedbackBar.appendChild(document.createTextNode('⚠️ '));
-                            feedbackBar.appendChild(ElementBuilder.create('strong', {}, `Line ${i + 1}:`));
-                            feedbackBar.appendChild(document.createTextNode(' Date is in the past'));
-                            btnConfirm.disabled = true;
-                            return null;
-                        }
-
-                        validDates.push({ string: DateEngine.formatForBoletos(dateObj), timestamp: dateObj.getTime() });
+                    if (containsErrors) {
+                        feedbackBar.textContent = '⚠️ Resolve compilation validation flags before duplication.';
+                        feedbackBar.className = 'bx-md-feedback bx-md-feedback-error';
+                        btnConfirm.disabled = true;
+                        return null;
                     }
 
                     feedbackBar.textContent = '';
                     feedbackBar.className = 'bx-md-feedback bx-md-feedback-success';
                     feedbackBar.appendChild(document.createTextNode('✅ '));
                     feedbackBar.appendChild(ElementBuilder.create('strong', {}, `${validDates.length} valid date(s)`));
-                    feedbackBar.appendChild(document.createTextNode(' parsed sequentially'));
+                    feedbackBar.appendChild(document.createTextNode(' verified successfully'));
                     btnConfirm.disabled = false;
                     return validDates;
                 };
@@ -432,7 +484,7 @@
 
                 // 4. Truncate Presenter & Update dynamic counters
                 const presenter = document.querySelector('input[name="presenter"]');
-                if (presenter) { // Optimized: Cached element reference instead of double execution querying
+                if (presenter) {
                     if (presenter.value.length > CONFIG.MAX_PRESENTER_LENGTH) {
                         presenter.value = presenter.value.slice(0, CONFIG.MAX_PRESENTER_LENGTH);
                         presenter.dispatchEvent(new Event('input', { bubbles: true }));
@@ -491,7 +543,6 @@
             copyObserver = new MutationObserver(() => { checkStatus(); });
             copyObserver.observe(document.body, { childList: true, subtree: true });
 
-            // Stability Cleanup: Unbind mutation handlers cleanly to mitigate race conditions
             setTimeout(() => { cleanupObserver(); }, 10000);
         },
 
