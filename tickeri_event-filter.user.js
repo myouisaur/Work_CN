@@ -2,7 +2,7 @@
 // @name         [Tickeri] Event Filter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://www.tickeri.com/promoter/tickeri-eo-favicon.ico
-// @version      4.4
+// @version      4.5
 // @description  Filters and highlights events on the dashboard by sales activity and text search.
 // @author       Xiv
 // @match        *://*.tickeri.com/*
@@ -48,7 +48,7 @@
         activeSalesCount: 0,
         searchQuery: "",
         cachedFilterContainer: null,
-        isSalesFilterActive: localStorage.getItem('tk-sales-filtered') === 'true' // Load preference across sessions
+        isSalesFilterActive: localStorage.getItem('tk-sales-filtered') === 'true'
     };
 
     // ==========================================
@@ -214,6 +214,12 @@
             }
         });
 
+        // Restore query on re-injection (e.g. after SPA navigation)
+        if (state.searchQuery) {
+            searchInput.value = state.searchQuery;
+            setTimeout(() => searchInput.dispatchEvent(new Event('input')), 0);
+        }
+
         const clearBtn = el('button', {
             className: 'tk-search-clear-btn',
             'aria-label': 'Clear search',
@@ -256,7 +262,7 @@
     }
 
     // ==========================================
-    // ACCESSIBILITY (Keyboard Shortcuts)
+    // ACCESSIBILITY & NAVIGATION HOOKS
     // ==========================================
 
     function initKeyboardShortcuts() {
@@ -264,11 +270,9 @@
             const searchInput = document.getElementById('tk-evt-search-input');
             if (!searchInput) return;
 
-            // Esc to clear input & blur
+            // Esc to blur (removes focus, preserves text)
             if (e.key === 'Escape' && document.activeElement === searchInput) {
                 e.preventDefault();
-                searchInput.value = '';
-                searchInput.dispatchEvent(new Event('input'));
                 searchInput.blur();
                 return;
             }
@@ -279,6 +283,38 @@
                 searchInput.focus();
             }
         });
+    }
+
+    function initSPAHandling() {
+        const handleNavigation = () => {
+            log('SPA navigation detected via History API.');
+            setTimeout(() => {
+                // If our observed node was destroyed by the framework, fallback to body
+                if (state.observedNode && state.observedNode !== document.body && !document.body.contains(state.observedNode)) {
+                    log('Target container lost during navigation. Reverting observer to body.');
+                    if (state.observer) state.observer.disconnect();
+                    state.observedNode = document.body;
+                    state.observer.observe(document.body, { childList: true, subtree: true });
+                } else {
+                    processTickets();
+                }
+            }, 100);
+        };
+
+        window.addEventListener('popstate', handleNavigation);
+
+        // Intercept client-side routing
+        const originalPushState = history.pushState;
+        history.pushState = function(...args) {
+            originalPushState.apply(this, args);
+            handleNavigation();
+        };
+
+        const originalReplaceState = history.replaceState;
+        history.replaceState = function(...args) {
+            originalReplaceState.apply(this, args);
+            handleNavigation();
+        };
     }
 
     // ==========================================
@@ -429,7 +465,6 @@
         injectSearchBar(targetContainer);
         injectEmptyState(targetContainer);
 
-        // Optimally scoped DOM query
         const h3Nodes = targetContainer.querySelectorAll('h3');
         let activeCount = 0;
         let requiresFilterUpdate = false;
@@ -478,7 +513,7 @@
             syncToggleUI(targetContainer);
         }
 
-        if (requiresFilterUpdate) {
+        if (requiresFilterUpdate || document.getElementById('tk-evt-search-wrapper')?.classList.contains('has-query') === false && state.searchQuery !== '') {
             applyUnifiedFilters(targetContainer, state.animId === 0);
         }
     }
@@ -503,6 +538,15 @@
         };
 
         state.observer = new MutationObserver((mutations) => {
+            // Safety check for detached node (in case history hook missed it during aggressive mutations)
+            if (state.observedNode && state.observedNode !== document.body && !document.body.contains(state.observedNode)) {
+                log('Observer detected dead node. Reverting to body.');
+                state.observer.disconnect();
+                state.observedNode = document.body;
+                state.observer.observe(document.body, { childList: true, subtree: true });
+                return; // Let the new observer catch the subsequent mutations
+            }
+
             // Reconnect to specific container when it loads (SPA handling)
             if (state.observedNode === document.body) {
                 if (connectToContainer()) {
@@ -549,6 +593,7 @@
         try {
             injectStyles();
             initKeyboardShortcuts();
+            initSPAHandling();
             processTickets();
             initSmartObserver();
             log('Initialization complete.');
