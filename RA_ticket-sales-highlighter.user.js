@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         [RA] Ticket Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
-// @icon         https://ra.co/static/favicon-32x32.png
-// @version      4.1
+// @icon         https://ra.co/static/favicon.svg
+// @version      4.2
 // @description  Highlights events with sales.
 // @author       Xiv
 // @match        *://*.ra.co/*
