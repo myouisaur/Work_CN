@@ -2,7 +2,7 @@
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRDA0MTBDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJ2MjBtLTctN2w3IDcgNy03Ii8+PC9zdmc+
-// @version      6.4
+// @version      6.5
 // @description  Extracts ticket sales and revenue data from supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
@@ -314,13 +314,13 @@
                     --uese-accent: #D0410C;
                     --uese-accent-rgb: 208, 65, 12;
 
-                    /* Deep, muted, professional "jewel" tones for background status */
-                    --status-rgb-scan: 30, 41, 59;       /* Dark Slate - Premium neutral */
-                    --status-rgb-green: 16, 75, 36;      /* Deep Forest Green */
-                    --status-rgb-yellow: 138, 62, 7;     /* Rich Bronze / Amber */
-                    --status-rgb-red: 136, 19, 55;       /* Deep Crimson / Rose */
+                    /* User-requested exact hex values converted to RGB */
+                    --status-rgb-scan: 30, 41, 59;       /* Dark Slate (default) */
+                    --status-rgb-green: 23, 132, 16;
+                    --status-rgb-yellow: 255, 224, 138;
+                    --status-rgb-red: 220, 20, 60;
 
-                    /* Default background color */
+                    /* Dynamic property for both background and indicator circle */
                     --uese-current-bg-rgb: var(--status-rgb-scan);
                 }
 
@@ -419,7 +419,7 @@
                     animation: uese-spin 1s linear infinite;
                 }
 
-                /* Pill background provides subtle separation */
+                /* Pill background provides subtle separation for the circle */
                 .uese-status-pill {
                     display: flex;
                     align-items: center;
@@ -434,23 +434,23 @@
                     transition: color 0.3s ease;
                 }
 
-                /* The indicator is now ALWAYS the site's accent color */
+                /* The indicator now ALWAYS matches the current status color */
                 .uese-indicator {
                     width: 10px;
                     height: 10px;
                     border-radius: 50%;
-                    background-color: var(--uese-accent);
-                    box-shadow: 0 0 6px var(--uese-accent), inset 0 0 2px rgba(0,0,0,0.5);
+                    background-color: rgb(var(--uese-current-bg-rgb));
+                    box-shadow: 0 0 6px rgb(var(--uese-current-bg-rgb)), inset 0 0 2px rgba(0,0,0,0.5);
                     border: 1px solid rgba(255, 255, 255, 0.4);
                     transition: all 0.3s ease;
                     flex-shrink: 0;
                 }
                 .uese-indicator.scanning {
-                    animation: uese-pulse-accent 1.5s infinite;
+                    animation: uese-pulse-status 1.5s infinite;
                 }
-                @keyframes uese-pulse-accent {
-                    0%, 100% { opacity: 0.6; box-shadow: 0 0 4px var(--uese-accent); transform: scale(1); }
-                    50% { opacity: 1; box-shadow: 0 0 10px var(--uese-accent); transform: scale(1.1); }
+                @keyframes uese-pulse-status {
+                    0%, 100% { opacity: 0.6; box-shadow: 0 0 4px rgb(var(--uese-current-bg-rgb)); transform: scale(1); }
+                    50% { opacity: 1; box-shadow: 0 0 10px rgb(var(--uese-current-bg-rgb)); transform: scale(1.1); }
                 }
 
                 .uese-tooltip {
@@ -957,7 +957,7 @@
 
     const App = {
         init() {
-            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.4'}`);
+            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '6.5'}`);
             UI.init();
             Router.init();
             Observer.start();
