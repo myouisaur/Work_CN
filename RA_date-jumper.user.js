@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         [RA] Date Jumper
 // @namespace    https://github.com/myouisaur/Work_CN
-// @icon         https://ra.co/static/favicon-32x32.png
-// @version      4.2
+// @icon         https://ra.co/static/favicon.svg
+// @version      4.3
 // @description  Adds a floating date selector that jumps to specific part of the page.
 // @author       Xiv
 // @match        *://*.ra.co/pro/events
