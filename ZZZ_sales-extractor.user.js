@@ -2,7 +2,7 @@
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRDA0MTBDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJ2MjBtLTctN2w3IDcgNy03Ii8+PC9zdmc+
-// @version      6.5
+// @version      6.6
 // @description  Extracts ticket sales and revenue data from supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
@@ -316,9 +316,9 @@
 
                     /* User-requested exact hex values converted to RGB */
                     --status-rgb-scan: 30, 41, 59;       /* Dark Slate (default) */
-                    --status-rgb-green: 23, 132, 16;
-                    --status-rgb-yellow: 255, 224, 138;
-                    --status-rgb-red: 220, 20, 60;
+                    --status-rgb-green: 35, 134, 54;
+                    --status-rgb-yellow: 249, 147, 56;
+                    --status-rgb-red: 220, 0, 27;
 
                     /* Dynamic property for both background and indicator circle */
                     --uese-current-bg-rgb: var(--status-rgb-scan);
