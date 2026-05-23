@@ -2,8 +2,8 @@
 // @name         [RA] Create Events
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://ra.co/static/favicon.svg
-// @version      3.7
-// @description  Allows bulk creation of multiple events simultaneously and automates subsequent ticket generation.
+// @version      3.8
+// @description  Allows bulk creation of multiple events simultaneously.
 // @author       Xiv
 // @match        *://*.ra.co/pro*
 // @run-at       document-start
@@ -34,6 +34,7 @@
         STORAGE_KEY_DESC: 'ramc_shared_description_payload',
         SESSION_KEY_ALLOC: 'ramc_allocation',
         SESSION_KEY_PRICE: 'ramc_price',
+
         KEYS: {
             TITLE: 'ramc_title',
             START_DATE: 'ramc_sdate',
@@ -56,8 +57,8 @@
         dates: '',
         allocation: '',
         price: '',
-        startTime: '23:00',
-        endTime: '06:00',
+        startTime: '',
+        endTime: '',
 
         flush() {
             this.title = '';
@@ -67,8 +68,8 @@
             this.dates = '';
             this.allocation = '';
             this.price = '';
-            this.startTime = '23:00';
-            this.endTime = '06:00';
+            this.startTime = '';
+            this.endTime = '';
         }
     };
 
@@ -262,7 +263,6 @@
                 .ra-mc-btn-reset:hover { color: #dc2626; background: #fef2f2; }
 
                 /* Native Button Target Glow & Unified Styling */
-                /* Removed custom borders/insets entirely so native borders behave naturally */
                 @keyframes ra-mc-trigger-pulse {
                     0% { box-shadow: 0 0 0 0 rgba(255, 72, 72, 0.9), 0 4px 10px rgba(255, 72, 72, 0.6); }
                     70% { box-shadow: 0 0 0 20px rgba(255, 72, 72, 0), 0 4px 15px rgba(255, 72, 72, 0.8); }
@@ -277,8 +277,6 @@
                     background-color: rgba(255, 72, 72, 0.08) !important;
                     position: relative !important;
                     z-index: 10 !important;
-
-                    /* Unified Layout Override */
                     display: inline-flex !important;
                     align-items: center !important;
                     justify-content: center !important;
@@ -289,8 +287,6 @@
                     text-decoration: none !important;
                     margin: 0 !important;
                     border-radius: 50px !important;
-
-                    /* Hide existing text and children completely */
                     font-size: 0 !important;
                     color: transparent !important;
                 }
@@ -301,7 +297,6 @@
                     display: none !important;
                 }
 
-                /* Inject uniform text directly via pseudo-element */
                 a[data-tracking-id*="/pro/event/create"]::after,
                 a[href$="/pro/event/create"]::after,
                 a[href*="/pro/event/create"]::after {
@@ -318,7 +313,6 @@
                     outline: none !important;
                 }
 
-                /* Active Hover States */
                 a[data-tracking-id*="/pro/event/create"]:hover,
                 a[href$="/pro/event/create"]:hover,
                 a[href*="/pro/event/create"]:hover {
@@ -377,6 +371,7 @@
                 const fieldDates = ElementBuilder.create('div', { className: 'ra-mc-field' },
                     ElementBuilder.create('label', { className: 'ra-mc-label' }, 'Target Dates (One per line)'), textareaDates
                 );
+
                 const panelPreview = ElementBuilder.create('div', { className: 'ra-mc-preview' });
                 const fieldPreview = ElementBuilder.create('div', { className: 'ra-mc-field' },
                     ElementBuilder.create('label', { className: 'ra-mc-label' }, 'Date Verification'), panelPreview
@@ -386,6 +381,12 @@
                 // Group 3: Start and End Times
                 const generateTimeOptions = (defaultSel) => {
                     const fragment = document.createDocumentFragment();
+
+                    // Blank, disabled default placeholder option
+                    const defaultOpt = ElementBuilder.create('option', { value: '', disabled: 'true' }, '');
+                    if (!defaultSel) defaultOpt.selected = true;
+                    fragment.appendChild(defaultOpt);
+
                     for (let h = 0; h < 24; h++) {
                         ['00', '30'].forEach(m => {
                             const timeStr = `${String(h).padStart(2, '0')}:${m}`;
@@ -423,6 +424,7 @@
                 const fieldAllocation = ElementBuilder.create('div', { className: 'ra-mc-field' },
                     ElementBuilder.create('label', { className: 'ra-mc-label' }, 'Available Tickets'), inputAllocation
                 );
+
                 const inputPrice = ElementBuilder.create('input', { type: 'number', className: 'ra-mc-input', value: ModalStateCache.price, placeholder: 'e.g. 25', min: '0' });
                 const fieldPrice = ElementBuilder.create('div', { className: 'ra-mc-field' },
                     ElementBuilder.create('label', { className: 'ra-mc-label' }, 'Price (USD)'), inputPrice
@@ -449,7 +451,6 @@
                 const feedbackBar = ElementBuilder.create('div', { className: 'ra-mc-feedback ra-mc-fb-neutral' }, 'Awaiting configuration variables...');
                 const btnReset = ElementBuilder.create('button', { type: 'button', className: 'ra-mc-btn ra-mc-btn-reset' }, 'Reset Fields');
                 const btnCancel = ElementBuilder.create('button', { type: 'button', className: 'ra-mc-btn ra-mc-btn-cancel' }, 'Cancel');
-                // Note: The button is no longer explicitly 'disabled' to allow us to catch clicks and display UI feedback.
                 const btnConfirm = ElementBuilder.create('button', { type: 'button', className: 'ra-mc-btn ra-mc-btn-primary is-disabled' }, 'Create');
                 const rowActions = ElementBuilder.create('div', { className: 'ra-mc-actions' }, btnReset, btnCancel, btnConfirm);
                 const modalFooter = ElementBuilder.create('div', { className: 'ra-mc-footer' }, feedbackBar, rowActions);
@@ -586,7 +587,7 @@
                     });
 
                     // Evaluate holistic form requirements after date mapping is complete
-                    const isFormFilled = titleVal && venueVal && allocVal && priceVal && descVal;
+                    const isFormFilled = titleVal && venueVal && allocVal && priceVal && descVal && ModalStateCache.startTime && ModalStateCache.endTime;
 
                     if (activeLines.length === 0) {
                         feedbackBar.className = 'ra-mc-feedback ra-mc-fb-neutral';
@@ -651,8 +652,8 @@
                     inputPrice.value = '';
                     textareaDesc.value = '';
                     textareaDates.value = '';
-                    selectStartTime.value = '23:00';
-                    selectEndTime.value = '06:00';
+                    selectStartTime.value = '';
+                    selectEndTime.value = '';
                     liveValidate();
                     inputName.focus();
                 });
@@ -684,7 +685,6 @@
                         }
                     }, 220);
                 });
-
             });
         }
     };
@@ -768,7 +768,6 @@
 
         async executeHydrationSequence(directPackage = null) {
             let dataPackage = directPackage;
-
             if (!dataPackage) {
                 const urlParams = new URLSearchParams(window.location.search);
                 if (!urlParams.has(CONFIG.KEYS.TITLE)) return;
@@ -787,14 +786,12 @@
                 };
 
                 TabRuntimeCache.youtubeLink = dataPackage.youtube;
-
                 if (dataPackage.allocation && dataPackage.price) {
                     sessionStorage.setItem(CONFIG.SESSION_KEY_ALLOC, dataPackage.allocation);
                     sessionStorage.setItem(CONFIG.SESSION_KEY_PRICE, dataPackage.price);
                 }
 
                 window.history.replaceState(null, '', window.location.pathname);
-
             } else {
                 TabRuntimeCache.youtubeLink = dataPackage.youtube;
                 if (dataPackage.allocation && dataPackage.price) {
@@ -821,7 +818,6 @@
 
                     const hiddenOriginalSDate = nativeDatePickers[0];
                     await this.forceValueForReactInput(hiddenOriginalSDate, dataPackage.sdate);
-
                     const customSDatePresentation = hiddenOriginalSDate.closest('.SelectDate__Container-sc-1kjd8zz-1, .Box-sc-1mwsjw2-0')?.querySelector('input[name="startDate"]');
                     if (customSDatePresentation) {
                         const parsedObj = new Date(dataPackage.sdate + 'T00:00:00');
@@ -829,7 +825,6 @@
                     }
 
                     await this.forceValueForReactSelect(selectStartTime, dataPackage.stime);
-
                     const hiddenOriginalEDate = nativeDatePickers[1];
                     await this.forceValueForReactInput(hiddenOriginalEDate, dataPackage.edate);
 
@@ -840,7 +835,6 @@
                     }
 
                     await this.forceValueForReactSelect(selectEndTime, dataPackage.etime);
-
                     if (dataPackage.venue) {
                         await this.forceValueForReactInput(inputVenueSearch, dataPackage.venue);
                     }
@@ -855,7 +849,6 @@
                     Logger.error('Execution context timeout: Unable to map required reactive Formik nodes before boundary cutoff.');
                 }
             }, 100);
-
         },
 
         monitorLineupStepHydration() {
@@ -942,8 +935,6 @@
         isRunning: false,
 
         monitorNavigation() {
-            // Checks on an interval because RA uses React Router (SPA navigation).
-            // The DOMContentLoaded event will not fire again when transitioning from creation to management.
             setInterval(async () => {
                 if (this.isRunning) return;
 
@@ -972,7 +963,6 @@
                     const elements = Array.from(document.querySelectorAll(selector));
                     const found = elements.find(el => {
                         if (textMatch) {
-                            // Extract actual text preventing hidden SVG markup from breaking exact matches
                             const rawText = el.innerText || el.textContent || '';
                             const txt = rawText.replace(/\s+/g, ' ').trim().toLowerCase();
                             const searchTxt = textMatch.toLowerCase();
@@ -1006,8 +996,6 @@
         async executeTicketCreation(allocation, price, attempt = 1) {
             try {
                 Logger.log(`Initializing Ticket Creation payload (Attempt ${attempt}/2)...`);
-
-                // Allow SPA routing and React layout shifting to settle completely
                 await FormInjector.sleep(1500);
 
                 // 1. Locate and engage "Add Ticket" interaction
@@ -1021,10 +1009,8 @@
 
                 // 2. Wait for Slide-in Modal render
                 await FormInjector.sleep(800);
-
                 const inputAlloc = await this.waitForElement('input#allocation');
                 const inputPrice = await this.waitForElement('input#revenuePerTicket');
-
                 if (!inputAlloc || !inputPrice) {
                     throw new Error('Timeout compiling ticket form geometry. Slide-in modal failed to load.');
                 }
@@ -1048,13 +1034,10 @@
 
                 // 5. Submit Transaction
                 let saveBtn = await this.waitForElement('button', 'Save', true, true, 8000);
-
-                // Safety Harness: If Save button is stubbornly refusing to activate due to missing React hooks, explicitly force a re-render sequence.
                 if (!saveBtn) {
                     Logger.log('Safety Harness: Forcing React re-render to activate Save button...');
                     await FormInjector.forceValueForReactInput(inputPrice, price); // Re-firing inject
                     document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-
                     saveBtn = await this.waitForElement('button', 'Save', true, true, 8000);
                     if (!saveBtn) throw new Error('Save button remains stubbornly disabled after secondary safety flush.');
                 }
@@ -1068,9 +1051,7 @@
 
                 // 7. Extract Clean URL and Copy to Clipboard
                 await FormInjector.sleep(1500);
-                // Grabs the origin + path, safely ignoring the ?eventFormType query strings
                 const cleanUrl = window.location.origin + window.location.pathname;
-
                 if (typeof GM_setClipboard !== 'undefined') {
                     GM_setClipboard(cleanUrl);
                 } else {
@@ -1080,7 +1061,6 @@
 
             } catch (err) {
                 Logger.error(`Ticket creation pipeline interrupted.`, err);
-
                 if (attempt < 2) {
                     Logger.log('Safety Harness: Reloading pipeline and initiating failover retry...');
                     await FormInjector.sleep(2000);
@@ -1101,7 +1081,6 @@
             if (operationalBatch && operationalBatch.length > 0) {
                 if (window.location.pathname.endsWith('/pro/event/create')) {
                     const activeTabSlice = operationalBatch.pop();
-
                     try {
                         GM_setValue(CONFIG.STORAGE_KEY_DESC, activeTabSlice.description);
                     } catch (e) {
@@ -1112,7 +1091,6 @@
                         TabEngine.deployExecutionBatches(operationalBatch);
                     }
                     FormInjector.executeHydrationSequence(activeTabSlice);
-
                 } else {
                     TabEngine.deployExecutionBatches(operationalBatch);
                 }
@@ -1128,7 +1106,6 @@
 
         async handleDashboardClicks(event) {
             if (!event.isTrusted) return;
-
             let trueTarget = event.composedPath ? event.composedPath()[0] : event.target;
 
             if (trueTarget && trueTarget.nodeType === Node.TEXT_NODE) {
@@ -1141,7 +1118,6 @@
                 'a[href$="/pro/event/create"], ' +
                 'a[href*="/pro/event/create"]'
             );
-
             if (!triggerAnchor) return;
 
             const hrefAttr = triggerAnchor.getAttribute('href') || '';
@@ -1150,7 +1126,6 @@
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
-
             Logger.log('Intercepted dashboard event creation pipeline request.');
 
             if (window !== window.top) {
@@ -1172,13 +1147,13 @@
             document.addEventListener('click', (e) => WorkflowEngine.handleDashboardClicks(e), true);
         },
         initDelayedModules() {
-            Styles.init(); // Initialize toast/modal styles globally on delay load
+            Styles.init();
             WorkflowEngine.handleDirectCreationPageIntercept();
             FormInjector.executeHydrationSequence();
             FormInjector.monitorLineupStepHydration();
             FormInjector.monitorDetailsStepHydration();
             FormInjector.monitorPromotionalStepHydration();
-            TicketManager.monitorNavigation(); // Start SPA background monitoring
+            TicketManager.monitorNavigation();
         }
     };
 
