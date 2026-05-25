@@ -2,12 +2,15 @@
 // @name         [Eventbrite] Recurring Date Highlight
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://cdn.evbstatic.com/s3-build/prod/2-rc2025-08-21_20.04-py27-7956025/django/images/favicons/favicon.ico
-// @version      1.6
-// @description  Adds a calendar to the recurring event icon, and highlights date.
+// @version      2.5
+// @description  Adds a calendar to recurring event icons and visually indicates if selected dates fall within the valid event schedule.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
+// @noframes
 // @grant        GM_addStyle
-// @run-at       document-idle
+// @grant        GM_registerMenuCommand
+// @grant        GM_setValue
+// @grant        GM_getValue
 // @updateURL    https://myouisaur.github.io/Work_CN/eventbrite_recurring-date-highlight.user.js
 // @downloadURL  https://myouisaur.github.io/Work_CN/eventbrite_recurring-date-highlight.user.js
 // ==/UserScript==
@@ -16,14 +19,205 @@
     'use strict';
 
     // ============================================================================
-    // 1. HELPERS & CONFIG
+    // 1. SAFEGUARDS & CONFIG
     // ============================================================================
 
-    const getLatestThursday = () => {
+    if (window.__ues_eb_recurring_running) return;
+    window.__ues_eb_recurring_running = true;
+
+    const CONFIG = {
+        SELECTORS: {
+            RECURRING_HEADING: ['p[class*="Typography_heading"]', 'h1', 'h2'],
+            DATE_WRAPPER: ['div[class*="EventDateDisplay_eventDateDisplay"]', '.js-event-date-display'],
+            DATE_TEXT: ['p', 'span'],
+            ICON: ['i', 'svg']
+        },
+        GM_STORAGE_KEY: 'ues_eb_preferred_day',
+        TIMERS: {
+            OBSERVER_DEBOUNCE_MS: 200
+        },
+        LOGIC: {
+            DEFAULT_DAY: 4, // 4 = Thursday
+            DAYS_MAP: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        },
+        ASSETS: {
+            CALENDAR_SVG: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`
+        }
+    };
+
+    // ============================================================================
+    // 2. STYLES (Native Eventbrite UI & Flex Layout)
+    // ============================================================================
+    const STYLES = `
+        :root {
+            /* Eventbrite Brand Colors */
+            --ues-eb-navy: #1e0a3c;
+            --ues-eb-grey: #eeedf2;
+            --ues-eb-blue: #3659e3;
+            --ues-eb-orange: #f05537;
+
+            /* Status Colors: Valid (Blue) */
+            --ues-valid-bg: #ebf0ff;
+            --ues-valid-text: var(--ues-eb-blue);
+            --ues-valid-border: var(--ues-eb-blue);
+
+            /* Status Colors: Invalid (Orange) */
+            --ues-invalid-bg: #fdece9;
+            --ues-invalid-text: var(--ues-eb-orange);
+            --ues-invalid-border: var(--ues-eb-orange);
+
+            --ues-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .ues-flex-container {
+            display: flex !important;
+            align-items: center !important;
+            gap: 12px !important;
+            flex-wrap: wrap !important;
+        }
+
+        .ues-date-badge {
+            border-radius: 0.375rem;
+            padding: 0.25rem 0.625rem !important;
+            margin: 0 !important;
+            transition: all 0.3s ease;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            font-weight: 500;
+            line-height: 1 !important;
+            box-sizing: border-box;
+        }
+
+        .ues-date-valid {
+            background-color: var(--ues-valid-bg) !important;
+            color: var(--ues-valid-text) !important;
+            border: 1px solid var(--ues-valid-border) !important;
+        }
+
+        .ues-date-invalid {
+            background-color: var(--ues-invalid-bg) !important;
+            color: var(--ues-invalid-text) !important;
+            border: 1px solid var(--ues-invalid-border) !important;
+        }
+
+        .ues-picker-btn {
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+            background: transparent !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            cursor: pointer !important;
+            position: relative !important;
+            outline: none !important;
+            font-family: inherit !important;
+        }
+
+        .ues-calendar-icon-box {
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-sizing: border-box !important;
+            min-width: 36px !important;
+            min-height: 36px !important;
+            border-radius: 0.375rem !important;
+            background-color: transparent !important;
+            transition: all 0.2s ease !important;
+            color: var(--ues-eb-navy) !important;
+        }
+
+        .ues-picker-btn.ues-is-valid:hover .ues-calendar-icon-box,
+        .ues-picker-btn.ues-is-valid:focus-visible .ues-calendar-icon-box {
+            background-color: rgba(54, 89, 227, 0.08) !important;
+            box-shadow: inset 0 0 0 2px var(--ues-eb-blue) !important;
+            transform: scale(1.05);
+        }
+
+        .ues-picker-btn.ues-is-invalid:hover .ues-calendar-icon-box,
+        .ues-picker-btn.ues-is-invalid:focus-visible .ues-calendar-icon-box {
+            background-color: rgba(240, 85, 55, 0.08) !important;
+            box-shadow: inset 0 0 0 2px var(--ues-eb-orange) !important;
+            transform: scale(1.05);
+        }
+
+        #ues-custom-tooltip {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--ues-eb-navy);
+            color: #ffffff;
+            padding: 0.5rem 0;
+            width: clamp(100px, 8rem, 120px);
+            box-sizing: border-box;
+            border-radius: 0.5rem;
+            font-size: clamp(0.75rem, 1vw, 0.875rem);
+            font-weight: 600;
+            box-shadow: var(--ues-shadow);
+            white-space: nowrap;
+            line-height: 1;
+            transition: transform 0.2s ease;
+        }
+
+        .ues-picker-btn:hover #ues-custom-tooltip {
+            transform: translateX(-2px);
+        }
+
+        #ues-custom-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: -5px;
+            transform: translateY(-50%);
+            border-width: 6px 0 6px 6px;
+            border-style: solid;
+            border-color: transparent transparent transparent var(--ues-eb-navy);
+        }
+
+        .ues-hide-original-icon {
+            display: none !important;
+        }
+
+        .ues-hidden-date-input {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            opacity: 0;
+            pointer-events: none;
+            width: 1px;
+            height: 1px;
+            border: none;
+            padding: 0;
+        }
+    `;
+
+    GM_addStyle(STYLES);
+
+    // ============================================================================
+    // 3. UTILITIES & DATA
+    // ============================================================================
+
+    const findFirstElement = (selectorArray, parent = document) => {
+        for (const selector of selectorArray) {
+            const el = parent.querySelector(selector);
+            if (el) return el;
+        }
+        return null;
+    };
+
+    const getLatestDayOfWeek = () => {
         const d = new Date();
-        const day = d.getDay();
-        const diff = (day >= 4) ? (day - 4) : (day + 3);
+        // Shift the reference point to yesterday so we strictly scan the past 7 completed days
+        d.setDate(d.getDate() - 1);
+
+        const currentDay = d.getDay();
+        const target = GM_getValue(CONFIG.GM_STORAGE_KEY, CONFIG.LOGIC.DEFAULT_DAY);
+        const diff = (currentDay >= target) ? (currentDay - target) : (currentDay + (7 - target));
+
         d.setDate(d.getDate() - diff);
+        d.setHours(0, 0, 0, 0);
         return d;
     };
 
@@ -34,137 +228,29 @@
         return `${y}-${m}-${d}`;
     };
 
-    // Formats date to "Apr 23, 2026"
     const formatForTooltip = (date) => {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     };
 
     const parseEndDate = (dateRangeStr) => {
-        if (!dateRangeStr) return null;
-        const parts = dateRangeStr.split('-');
-        if (parts.length >= 2) {
-            return new Date(parts[1].trim());
+        if (!dateRangeStr || typeof dateRangeStr !== 'string') return null;
+        try {
+            const parts = dateRangeStr.split('-');
+            if (parts.length >= 2) {
+                const parsedDate = new Date(parts[1].trim());
+                if (!isNaN(parsedDate.getTime())) {
+                    parsedDate.setHours(0, 0, 0, 0);
+                    return parsedDate;
+                }
+            }
+        } catch (err) {
+            console.warn('[Eventbrite Date Highlight] Could not parse date string:', dateRangeStr);
         }
         return null;
     };
 
     // ============================================================================
-    // 2. STYLES
-    // ============================================================================
-    const STYLES = `
-        /* --- Date Badge Base --- */
-        .ues-date-badge {
-            border-radius: 6px;
-            /* Use symmetric padding and line-height: 1 to perfectly center text inside */
-            padding: 4px 10px !important;
-            margin-left: 8px !important;
-            margin-top: 0 !important;
-            margin-bottom: 0 !important;
-            transition: all 0.3s ease;
-            display: inline-flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            font-weight: 500;
-            line-height: 1 !important;
-            vertical-align: middle;
-            box-sizing: border-box;
-        }
-
-        /* --- Valid Date (Stronger Green) --- */
-        .ues-date-valid {
-            background-color: #a7f3d0 !important;
-            color: #064e3b !important;
-            border: 1px solid #10b981 !important;
-        }
-
-        /* --- Invalid Date (Stronger Red) --- */
-        .ues-date-invalid {
-            background-color: #fecaca !important;
-            color: #7f1d1d !important;
-            border: 1px solid #ef4444 !important;
-        }
-
-        /* --- Clickable Calendar Icon --- */
-        .ues-calendar-trigger {
-            cursor: pointer !important;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-            padding: 2px;
-            vertical-align: middle;
-            display: inline-flex;
-            align-items: center;
-        }
-        .ues-calendar-trigger:hover {
-            transform: scale(1.1);
-            background-color: rgba(0,0,0,0.05);
-        }
-
-        /* --- Permanent Custom Date Display --- */
-        #ues-custom-tooltip {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            vertical-align: middle;
-            background-color: #ffffff;
-            color: #1e1b4b;
-            border: 1px solid #d1d5db;
-            padding: 8px 0; /* Remove side padding since we are using fixed width */
-            width: 115px; /* Fixed width prevents neighboring elements from shifting */
-            box-sizing: border-box;
-            border-radius: 8px;
-            font-family: "Neue Plak", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
-            font-size: 14px;
-            font-weight: 600;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            margin-right: 14px;
-            white-space: nowrap;
-            z-index: 10;
-            line-height: 1;
-        }
-
-        /* Tooltip Arrow Border */
-        #ues-custom-tooltip::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            right: -8px;
-            transform: translateY(-50%);
-            border-width: 8px 0 8px 8px;
-            border-style: solid;
-            border-color: transparent transparent transparent #d1d5db;
-        }
-
-        /* Tooltip Arrow Inner Fill */
-        #ues-custom-tooltip::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            right: -7px;
-            transform: translateY(-50%);
-            border-width: 7px 0 7px 7px;
-            border-style: solid;
-            border-color: transparent transparent transparent #ffffff;
-        }
-
-        /* --- Hidden Native Date Input --- */
-        .ues-hidden-date-input {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            padding: 0;
-            margin: -1px;
-            overflow: hidden;
-            clip: rect(0, 0, 0, 0);
-            white-space: nowrap;
-            border: 0;
-        }
-    `;
-
-    GM_addStyle(STYLES);
-
-    // ============================================================================
-    // 3. CORE LOGIC
+    // 4. CORE LOGIC
     // ============================================================================
 
     let domObserver = null;
@@ -172,133 +258,185 @@
     let hasInjected = false;
 
     function init() {
-        const originalPush = history.pushState;
-        history.pushState = function() { originalPush.apply(history, arguments); resetAndScan(); };
-        const originalReplace = history.replaceState;
-        history.replaceState = function() { originalReplace.apply(history, arguments); resetAndScan(); };
-        window.addEventListener('popstate', resetAndScan);
+        // Register Power User Menu
+        GM_registerMenuCommand("📅 Set Default Day", () => {
+            const currentVal = GM_getValue(CONFIG.GM_STORAGE_KEY, CONFIG.LOGIC.DEFAULT_DAY);
+            const input = prompt(
+                `Enter the default day of the week you want the calendar to start on (e.g., Monday, Thursday):\n\nCurrent Default: ${CONFIG.LOGIC.DAYS_MAP[currentVal]}`
+            );
 
-        startObservers();
-        document.addEventListener('visibilitychange', () => {
-            document.hidden ? stopObservers() : startObservers();
+            if (!input) return;
+
+            const cleanInput = input.trim().toLowerCase();
+            const dayIndex = CONFIG.LOGIC.DAYS_MAP.findIndex(d => d.toLowerCase().startsWith(cleanInput));
+
+            if (dayIndex !== -1) {
+                GM_setValue(CONFIG.GM_STORAGE_KEY, dayIndex);
+                alert(`Success! Default day set to ${CONFIG.LOGIC.DAYS_MAP[dayIndex]}.`);
+                resetAndScan();
+            } else {
+                alert("Invalid input. Please enter a full day name (like 'Monday').");
+            }
         });
 
+        const handleNavigation = () => {
+            requestAnimationFrame(() => resetAndScan());
+        };
+
+        const originalPush = history.pushState;
+        history.pushState = function() { originalPush.apply(history, arguments); handleNavigation(); };
+        const originalReplace = history.replaceState;
+        history.replaceState = function() { originalReplace.apply(history, arguments); handleNavigation(); };
+        window.addEventListener('popstate', handleNavigation);
+
         resetAndScan();
+        startObservers();
+    }
+
+    function cleanupOldElements() {
+        const oldBtn = document.getElementById('ues-picker-btn');
+        if (oldBtn) oldBtn.remove();
+
+        const injectedIcons = document.querySelectorAll('[data-ues-injected]');
+        injectedIcons.forEach(icon => {
+            icon.removeAttribute('data-ues-injected');
+            icon.classList.remove('ues-hide-original-icon');
+        });
     }
 
     function resetAndScan() {
         hasInjected = false;
+        cleanupOldElements();
         scanPage();
     }
 
     function startObservers() {
         if (!domObserver) {
             domObserver = new MutationObserver(() => {
+                if (hasInjected && !document.getElementById('ues-picker-btn')) {
+                    hasInjected = false;
+                }
+
                 if (!hasInjected) {
                     clearTimeout(scanTimer);
-                    scanTimer = setTimeout(scanPage, 150);
+                    scanTimer = setTimeout(scanPage, CONFIG.TIMERS.OBSERVER_DEBOUNCE_MS);
                 }
             });
+
             domObserver.observe(document.body, { childList: true, subtree: true });
         }
-    }
-
-    function stopObservers() {
-        if (domObserver) { domObserver.disconnect(); domObserver = null; }
-        clearTimeout(scanTimer);
     }
 
     function scanPage() {
         if (hasInjected) return;
 
-        const isRecurring = Array.from(document.querySelectorAll('p[class*="Typography_heading"]'))
-            .some(p => p.innerText.includes("Recurring event overview"));
+        try {
+            const headings = Array.from(document.querySelectorAll(CONFIG.SELECTORS.RECURRING_HEADING.join(', ')));
+            const isRecurring = headings.some(el => el.innerText.includes("Recurring event overview"));
+            if (!isRecurring) return;
 
-        if (!isRecurring) return;
+            const dateContainer = findFirstElement(CONFIG.SELECTORS.DATE_WRAPPER);
+            if (!dateContainer) return;
 
-        const dateContainer = document.querySelector('div[class*="EventDateDisplay_eventDateDisplay"]');
-        if (!dateContainer) return;
+            const dateTextElem = findFirstElement(CONFIG.SELECTORS.DATE_TEXT, dateContainer);
+            const originalIcon = findFirstElement(CONFIG.SELECTORS.ICON, dateContainer);
 
-        const dateTextElem = dateContainer.querySelector('p');
-        const iconElem = dateContainer.querySelector('i');
+            if (!dateTextElem || !originalIcon || originalIcon.hasAttribute('data-ues-injected')) return;
 
-        if (!dateTextElem || !iconElem || iconElem.hasAttribute('data-ues-injected')) return;
+            const endDate = parseEndDate(dateTextElem.innerText);
+            if (!endDate) return;
 
-        const endDate = parseEndDate(dateTextElem.innerText);
-        if (!endDate || isNaN(endDate.getTime())) return;
+            injectDatePicker(dateContainer, originalIcon, dateTextElem, endDate);
+            hasInjected = true;
 
-        injectDatePicker(dateContainer, iconElem, dateTextElem, endDate);
-        hasInjected = true;
-    }
-
-    function evaluateDateState(selectedDate, endDate, textElement) {
-        selectedDate.setHours(0, 0, 0, 0);
-        endDate.setHours(0, 0, 0, 0);
-
-        textElement.classList.add('ues-date-badge');
-
-        if (selectedDate > endDate) {
-            textElement.classList.add('ues-date-invalid');
-            textElement.classList.remove('ues-date-valid');
-        } else {
-            textElement.classList.add('ues-date-valid');
-            textElement.classList.remove('ues-date-invalid');
+        } catch (err) {
+            console.error('[Eventbrite Date Highlight] Error during page scan:', err);
         }
     }
 
-    function injectDatePicker(container, icon, textElement, endDate) {
-        icon.setAttribute('data-ues-injected', 'true');
-        icon.classList.add('ues-calendar-trigger');
+    function evaluateDateState(selectedDate, endDate, textElement, btnElement) {
+        const isInvalid = selectedDate.getTime() > endDate.getTime();
 
-        // Setup hidden date input
-        let dateInput = document.getElementById('ues-eb-date-picker');
-        if (!dateInput) {
-            dateInput = document.createElement('input');
-            dateInput.type = 'date';
-            dateInput.id = 'ues-eb-date-picker';
-            dateInput.classList.add('ues-hidden-date-input');
-            document.body.appendChild(dateInput);
-        }
+        requestAnimationFrame(() => {
+            textElement.classList.add('ues-date-badge');
+            if (isInvalid) {
+                textElement.classList.add('ues-date-invalid');
+                textElement.classList.remove('ues-date-valid');
+                btnElement.classList.add('ues-is-invalid');
+                btnElement.classList.remove('ues-is-valid');
+            } else {
+                textElement.classList.add('ues-date-valid');
+                textElement.classList.remove('ues-date-invalid');
+                btnElement.classList.add('ues-is-valid');
+                btnElement.classList.remove('ues-is-invalid');
+            }
+        });
+    }
 
-        // Setup the permanent custom date display
-        let tooltip = document.getElementById('ues-custom-tooltip');
-        if (!tooltip) {
-            tooltip = document.createElement('div');
-            tooltip.id = 'ues-custom-tooltip';
-            icon.parentNode.insertBefore(tooltip, icon);
-        }
+    function injectDatePicker(container, originalIcon, textElement, endDate) {
+        container.classList.add('ues-flex-container');
 
-        // Set Default Date and visually populate
-        let currentSelectedDate = getLatestThursday();
-        dateInput.value = formatDateToYYYYMMDD(currentSelectedDate);
-        tooltip.innerText = formatForTooltip(currentSelectedDate);
-        evaluateDateState(currentSelectedDate, endDate, textElement);
+        originalIcon.setAttribute('data-ues-injected', 'true');
+        originalIcon.classList.add('ues-hide-original-icon');
 
-        // Click Event (Opens Native Calendar)
-        icon.addEventListener('click', (e) => {
+        const btn = document.createElement('button');
+        btn.id = 'ues-picker-btn';
+        btn.className = 'ues-picker-btn';
+        btn.setAttribute('type', 'button');
+        btn.setAttribute('aria-label', 'Select a date to check availability');
+
+        const iconWrapper = document.createElement('div');
+        iconWrapper.className = 'ues-calendar-icon-box';
+        iconWrapper.innerHTML = CONFIG.ASSETS.CALENDAR_SVG;
+
+        const tooltip = document.createElement('div');
+        tooltip.id = 'ues-custom-tooltip';
+
+        const dateInput = document.createElement('input');
+        dateInput.type = 'date';
+        dateInput.className = 'ues-hidden-date-input';
+
+        btn.appendChild(tooltip);
+        btn.appendChild(iconWrapper);
+        btn.appendChild(dateInput);
+
+        container.insertBefore(btn, textElement);
+
+        let currentSelectedDate = getLatestDayOfWeek();
+
+        const applyVisualState = (dateObj) => {
+            requestAnimationFrame(() => {
+                dateInput.value = formatDateToYYYYMMDD(dateObj);
+                tooltip.innerText = formatForTooltip(dateObj);
+                evaluateDateState(dateObj, endDate, textElement, btn);
+            });
+        };
+
+        applyVisualState(currentSelectedDate);
+
+        const handleOpenPicker = (e) => {
             e.preventDefault();
             e.stopPropagation();
             try {
-                const rect = icon.getBoundingClientRect();
-                dateInput.style.top = `${rect.bottom + window.scrollY}px`;
-                dateInput.style.left = `${rect.left + window.scrollX}px`;
-
                 dateInput.showPicker();
             } catch (err) {
-                console.warn("Browser doesn't support showPicker(), falling back to focus.", err);
                 dateInput.focus();
             }
+        };
+
+        btn.addEventListener('click', handleOpenPicker);
+        btn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') handleOpenPicker(e);
         });
 
-        // Date Change Event (Updates UI)
         dateInput.addEventListener('change', (e) => {
             if (!e.target.value) return;
 
             const parts = e.target.value.split('-');
             currentSelectedDate = new Date(parts[0], parts[1] - 1, parts[2]);
+            currentSelectedDate.setHours(0, 0, 0, 0);
 
-            tooltip.innerText = formatForTooltip(currentSelectedDate);
-            evaluateDateState(currentSelectedDate, endDate, textElement);
+            applyVisualState(currentSelectedDate);
         });
     }
 
