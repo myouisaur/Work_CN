@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         [Boletos Express] Event Filter
-// @namespace    https://github.com/myouisaur/Work_CN
+// @namespace    https://github.com/myouisaur/userscripts
 // @icon         https://www.boletosexpress.com/favicon.ico
-// @version      1.3
-// @description  Adds advanced text, date range, and section filtering to the Boletos Express promoter dashboard.
+// @version      1.9
+// @description  Adds advanced text, date range, section filtering, sorting, and smart infinite scroll to the Boletos Express promoter dashboard.
 // @author       Xiv
 // @match        *://*.boletosexpress.com/promoters/dashboard.php*
 // @match        *://*.boletosexpress.com/promoters/events.php*
@@ -25,6 +25,7 @@
     const CONFIG = {
         DEBUG: false,
         DEBOUNCE_MS: 250,
+        CHUNK_SIZE: 50, // Number of events to render per scroll tick (after initial load)
         SELECTORS: {
             EVENT_CARD: '.event',
             UPCOMING_CONTAINER: '#upcoming_events',
@@ -34,17 +35,29 @@
         }
     };
 
+    const isEventsPage = window.location.pathname.includes('events.php');
+
     const state = {
         query: '',
         dateFrom: null,
         dateTo: null,
-        showUpcoming: true, // Always ON upon initial load
-        showPast: true,     // Always ON upon initial load
+        sortUpcoming: 'date-asc',
+        sortPast: 'date-desc',
+        showUpcoming: !isEventsPage, // OFF by default on events.php, ON for dashboard
+        showPast: true,
         debounceTimer: null,
+        observerTimer: null,
+        io: null,
+        isMutating: false,
+
+        // High-Performance Memory Architecture
+        pool: [],
+        filtered: { upcoming: [], past: [] },
+        renderIndex: { upcoming: 0, past: 0 },
+
         totalEvents: 0,
         visibleEvents: 0,
-        animId: 0,
-        isEventsPage: window.location.pathname.includes('events.php')
+        isEventsPage: isEventsPage
     };
 
     // ==========================================
@@ -78,11 +91,10 @@
     function parseEventDate(timeStr) {
         if (!timeStr) return null;
 
-        // Target specifically the "Month DD, YYYY" portion
         const match = timeStr.match(/([a-zA-Z]+)\s+(\d+),\s+(\d{4})/);
         if (match) {
             const date = new Date(match[0]);
-            date.setHours(0, 0, 0, 0); // Normalize to local midnight
+            date.setHours(0, 0, 0, 0);
             return date.getTime();
         }
         return null;
@@ -91,7 +103,6 @@
     function parseInputDateToLocal(dateString, isEndOfDay = false) {
         if (!dateString) return null;
 
-        // dateString format: "YYYY-MM-DD". Force local timezone evaluation.
         const [year, month, day] = dateString.split('-').map(Number);
         const date = new Date(year, month - 1, day);
 
@@ -101,6 +112,13 @@
             date.setHours(0, 0, 0, 0);
         }
         return date.getTime();
+    }
+
+    function getIconSvg() {
+        return new DOMParser().parseFromString(
+            `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 12px; opacity: 0.4;"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>`,
+            'image/svg+xml'
+        ).documentElement;
     }
 
     // ==========================================
@@ -128,7 +146,7 @@
                 display: flex;
                 flex-wrap: wrap;
                 gap: 16px;
-                align-items: flex-start;
+                align-items: flex-end;
             }
 
             .bx-ef-group {
@@ -136,7 +154,7 @@
                 flex-direction: column;
                 gap: 6px;
                 flex: 1;
-                min-width: 200px;
+                min-width: 140px;
             }
 
             .bx-ef-label {
@@ -147,7 +165,7 @@
                 letter-spacing: 0.05em;
             }
 
-            .bx-ef-input {
+            .bx-ef-input, .bx-ef-select {
                 padding: 10px 14px;
                 border: 1px solid #d1d5db;
                 border-radius: 6px;
@@ -158,12 +176,13 @@
                 outline: none;
                 width: 100%;
                 box-sizing: border-box;
+                font-family: inherit;
             }
 
-            .bx-ef-input:focus {
+            .bx-ef-input:focus, .bx-ef-select:focus, .bx-ef-toggle:focus {
                 border-color: #1C2A7C;
                 background-color: #ffffff;
-                box-shadow: 0 0 0 3px rgba(28, 42, 124, 0.1);
+                box-shadow: 0 0 0 3px rgba(28, 42, 124, 0.15);
             }
 
             .bx-ef-input-error {
@@ -191,6 +210,7 @@
                 display: flex;
                 gap: 10px;
                 align-items: center;
+                flex-wrap: wrap;
             }
 
             .bx-ef-toggle {
@@ -203,8 +223,9 @@
                 background-color: #f3f4f6;
                 color: #6b7280;
                 transition: all 0.2s ease;
-                display: flex;
+                display: inline-flex;
                 align-items: center;
+                gap: 6px;
             }
 
             .bx-ef-toggle.active {
@@ -222,7 +243,16 @@
                 background-color: #ffffff;
                 color: #ef4444;
                 border-color: #fca5a5;
-                margin-left: 8px;
+                margin-left: auto;
+                opacity: 0;
+                pointer-events: none;
+                transform: scale(0.95);
+            }
+
+            .bx-ef-reset.bx-ef-visible {
+                opacity: 1;
+                pointer-events: auto;
+                transform: scale(1);
             }
 
             .bx-ef-reset:hover {
@@ -244,14 +274,17 @@
             }
 
             .bx-ef-empty-msg {
-                padding: 30px;
-                text-align: center;
+                display: none;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 20px;
                 color: #6b7280;
-                font-size: 1rem;
                 background: #f9fafb;
                 border-radius: 8px;
                 border: 2px dashed #d1d5db;
-                grid-column: 1 / -1;
+                margin-top: 20px;
+                margin-bottom: 20px;
                 width: 100%;
                 box-sizing: border-box;
             }
@@ -261,85 +294,176 @@
     }
 
     // ==========================================
-    // DOM PROCESSING & FILTERING
+    // INFINITE SCROLL & MEMORY MANAGEMENT
     // ==========================================
 
     function preprocessEvents() {
+        state.isMutating = true;
         const events = document.querySelectorAll(CONFIG.SELECTORS.EVENT_CARD);
+        let addedNew = false;
 
         events.forEach(card => {
             if (card.dataset.bxProcessed === 'true') return;
 
-            // 1. Text indexing
-            card.dataset.bxSearchText = card.textContent.toLowerCase().trim();
-
-            // 2. Date parsing
+            const searchStr = card.textContent.toLowerCase().trim();
             const timeEl = card.querySelector(CONFIG.SELECTORS.TIME_ELEMENT);
-            const parsedTime = timeEl ? parseEventDate(timeEl.textContent) : null;
-            if (parsedTime !== null) {
-                card.dataset.bxTimestamp = parsedTime;
-            }
-
-            // 3. Section determination
+            const timestamp = timeEl ? parseEventDate(timeEl.textContent) : null;
             const isPast = !!card.closest(CONFIG.SELECTORS.PAST_CONTAINER);
-            card.dataset.bxSection = isPast ? 'past' : 'upcoming';
+            const section = isPast ? 'past' : 'upcoming';
 
             card.dataset.bxProcessed = 'true';
+
+            state.pool.push({
+                el: card,
+                searchStr,
+                timestamp,
+                section
+            });
+
+            // Instantly remove to clear browser memory constraints
+            card.remove();
+            addedNew = true;
         });
 
-        state.totalEvents = events.length;
+        if (addedNew) {
+            state.totalEvents = state.pool.length;
+        }
+
+        setTimeout(() => { state.isMutating = false; }, 0);
+        return addedNew;
+    }
+
+    function sortFilteredEvents(section, sortVal) {
+        state.filtered[section].sort((a, b) => {
+            let valA, valB;
+            if (sortVal === 'date-asc' || sortVal === 'date-desc') {
+                valA = parseInt(a.timestamp, 10) || Number.MAX_SAFE_INTEGER;
+                valB = parseInt(b.timestamp, 10) || Number.MAX_SAFE_INTEGER;
+                return sortVal === 'date-asc' ? valA - valB : valB - valA;
+            } else if (sortVal === 'title-asc') {
+                return a.searchStr.localeCompare(b.searchStr);
+            }
+        });
+    }
+
+    function renderNextPage(section, targetEndIndex = null) {
+        const containerSelector = section === 'upcoming' ? CONFIG.SELECTORS.UPCOMING_CONTAINER : CONFIG.SELECTORS.PAST_CONTAINER;
+        const container = document.querySelector(containerSelector);
+        if (!container) return;
+
+        const sentinel = document.getElementById(`bx-ef-sentinel-${section}`);
+        const list = state.filtered[section];
+        const start = state.renderIndex[section];
+
+        let end = targetEndIndex !== null ? targetEndIndex : start + CONFIG.CHUNK_SIZE;
+        end = Math.min(end, list.length);
+
+        if (start >= end) return;
+
+        state.isMutating = true;
+        const fragment = document.createDocumentFragment();
+
+        for (let i = start; i < end; i++) {
+            fragment.appendChild(list[i].el);
+        }
+
+        if (sentinel) {
+            container.insertBefore(fragment, sentinel);
+        } else {
+            container.appendChild(fragment);
+        }
+
+        state.renderIndex[section] = end;
+        setTimeout(() => { state.isMutating = false; }, 0);
     }
 
     function executeFilter() {
-        state.animId++;
-        const currentAnim = state.animId;
+        // 1. Process Filtering In-Memory
+        state.filtered.upcoming = [];
+        state.filtered.past = [];
+        let visibleCount = 0;
 
-        requestAnimationFrame(() => {
-            if (state.animId !== currentAnim) return;
+        state.pool.forEach(item => {
+            let isVisible = true;
 
-            const events = document.querySelectorAll(CONFIG.SELECTORS.EVENT_CARD);
-            let visibleCount = 0;
-            const visibilityMatrix = { upcoming: 0, past: 0 };
+            if (item.section === 'past' && !state.showPast) isVisible = false;
+            if (item.section === 'upcoming' && !state.showUpcoming) isVisible = false;
 
-            events.forEach(card => {
-                const section = card.dataset.bxSection;
-                const searchStr = card.dataset.bxSearchText || '';
-                const timestamp = parseInt(card.dataset.bxTimestamp, 10);
+            if (isVisible && state.query) {
+                if (!item.searchStr.includes(state.query)) isVisible = false;
+            }
 
-                let isVisible = true;
+            if (isVisible && !isNaN(item.timestamp)) {
+                if (state.dateFrom && item.timestamp < state.dateFrom) isVisible = false;
+                if (state.dateTo && item.timestamp > state.dateTo) isVisible = false;
+            }
 
-                // 1. Toggle Filter
-                if (section === 'past' && !state.showPast) isVisible = false;
-                if (section === 'upcoming' && !state.showUpcoming) isVisible = false;
-
-                // 2. Text Search Filter
-                if (isVisible && state.query) {
-                    if (!searchStr.includes(state.query)) {
-                        isVisible = false;
-                    }
-                }
-
-                // 3. Date Range Filter
-                if (isVisible && !isNaN(timestamp)) {
-                    if (state.dateFrom && timestamp < state.dateFrom) isVisible = false;
-                    if (state.dateTo && timestamp > state.dateTo) isVisible = false;
-                }
-
-                card.classList.toggle('bx-ef-hidden', !isVisible);
-
-                if (isVisible) {
-                    visibleCount++;
-                    visibilityMatrix[section]++;
-                }
-            });
-
-            state.visibleEvents = visibleCount;
-            updateStatsUI();
-            updateEmptyStates(visibilityMatrix);
+            if (isVisible) {
+                state.filtered[item.section].push(item);
+                visibleCount++;
+            } else {
+                if (item.el.parentNode) item.el.remove();
+            }
         });
+
+        state.visibleEvents = visibleCount;
+
+        // 2. Process Sorting In-Memory
+        sortFilteredEvents('upcoming', state.sortUpcoming);
+        sortFilteredEvents('past', state.sortPast);
+
+        // 3. Clear existing DOM renders cleanly
+        state.isMutating = true;
+        state.filtered.upcoming.forEach(item => { if (item.el.parentNode) item.el.remove(); });
+        state.filtered.past.forEach(item => { if (item.el.parentNode) item.el.remove(); });
+        state.isMutating = false;
+
+        // 4. Smart Initial Render
+        state.renderIndex = { upcoming: 0, past: 0 };
+
+        // UPCOMING: Render all events instantly
+        renderNextPage('upcoming', state.filtered.upcoming.length);
+
+        // PAST: Render everything up to 30 days old instantly
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        let pastInitialCount = 0;
+
+        for (let i = 0; i < state.filtered.past.length; i++) {
+            if (state.filtered.past[i].timestamp >= thirtyDaysAgo) {
+                pastInitialCount++;
+            } else if (state.sortPast === 'date-desc') {
+                break;
+            }
+        }
+
+        // Ensure we always render a small initial chunk so the scrollbar exists to trigger the infinite observer
+        pastInitialCount = Math.max(pastInitialCount, 25);
+        renderNextPage('past', pastInitialCount);
+
+        updateStatsUI();
+        updateEmptyStates();
+        updateClearButtonState();
     }
 
-    function updateEmptyStates(matrix) {
+    function updateEmptyStates() {
+        const matrix = {
+            upcoming: state.filtered.upcoming.length,
+            past: state.filtered.past.length
+        };
+
+        const globalEmpty = document.getElementById('bx-ef-global-empty');
+        const allTogglesOff = !state.showUpcoming && (!state.isEventsPage || !state.showPast);
+
+        if (globalEmpty) {
+            if (allTogglesOff) {
+                globalEmpty.classList.remove('bx-ef-hidden');
+                globalEmpty.style.display = 'flex';
+            } else {
+                globalEmpty.classList.add('bx-ef-hidden');
+                globalEmpty.style.display = 'none';
+            }
+        }
+
         const sections = [
             { id: CONFIG.SELECTORS.UPCOMING_CONTAINER, count: matrix.upcoming, name: 'upcoming' },
             { id: CONFIG.SELECTORS.PAST_CONTAINER, count: matrix.past, name: 'past' }
@@ -354,12 +478,16 @@
 
             container.classList.toggle('bx-ef-hidden', !isActiveToggle);
 
-            if (isActiveToggle && sec.count === 0 && document.querySelectorAll(`${sec.id} ${CONFIG.SELECTORS.EVENT_CARD}`).length > 0) {
+            if (isActiveToggle && sec.count === 0 && state.pool.filter(i => i.section === sec.name).length > 0) {
                 if (!emptyMsg) {
-                    emptyMsg = el('div', { className: 'bx-ef-empty-msg', textContent: 'No events match your current filters.' });
+                    emptyMsg = el('div', { className: 'bx-ef-empty-msg' }, [
+                        getIconSvg(),
+                        el('div', { textContent: 'No events found', style: 'font-weight: 600; color: #111827; margin-bottom: 4px;' }),
+                        el('div', { textContent: 'Try adjusting your filters or date range.', style: 'font-size: 0.85rem;' })
+                    ]);
                     container.appendChild(emptyMsg);
                 }
-                emptyMsg.style.display = 'block';
+                emptyMsg.style.display = 'flex';
             } else if (emptyMsg) {
                 emptyMsg.style.display = 'none';
             }
@@ -373,13 +501,37 @@
         }
     }
 
+    function updateClearButtonState() {
+        const btnReset = document.getElementById('bx-ef-reset-btn');
+        if (!btnReset) return;
+
+        const isFilterActive = state.query !== '' || state.dateFrom !== null || state.dateTo !== null;
+        btnReset.classList.toggle('bx-ef-visible', isFilterActive);
+    }
+
     // ==========================================
-    // UI CONSTRUCTION
+    // UI CONSTRUCTION & KEYBOARD
     // ==========================================
+
+    function createSortSelect(id, defaultVal, onChange) {
+        const select = el('select', { id: id, className: 'bx-ef-select', onChange: onChange });
+        const options = [
+            { value: 'date-asc', text: 'Date: Earliest First' },
+            { value: 'date-desc', text: 'Date: Latest First' },
+            { value: 'title-asc', text: 'Title: A-Z' }
+        ];
+        options.forEach(opt => {
+            const option = el('option', { value: opt.value, textContent: opt.text });
+            if (opt.value === defaultVal) option.selected = true;
+            select.appendChild(option);
+        });
+        return select;
+    }
 
     function buildFilterPanel() {
         const searchInput = el('input', {
             type: 'text',
+            id: 'bx-ef-search',
             className: 'bx-ef-input',
             placeholder: 'Search by title, venue, or address...',
             onInput: (e) => {
@@ -389,11 +541,20 @@
             }
         });
 
-        const dateFromInput = el('input', { type: 'date', className: 'bx-ef-input bx-ef-date' });
-        const dateToInput = el('input', { type: 'date', className: 'bx-ef-input bx-ef-date' });
+        const sortUpcomingSelect = createSortSelect('bx-ef-sort-upcoming', state.sortUpcoming, (e) => {
+            state.sortUpcoming = e.target.value;
+            executeFilter();
+        });
+
+        const sortPastSelect = createSortSelect('bx-ef-sort-past', state.sortPast, (e) => {
+            state.sortPast = e.target.value;
+            executeFilter();
+        });
+
+        const dateFromInput = el('input', { type: 'date', id: 'bx-ef-date-from', className: 'bx-ef-input bx-ef-date' });
+        const dateToInput = el('input', { type: 'date', id: 'bx-ef-date-to', className: 'bx-ef-input bx-ef-date' });
         const dateErrorMsg = el('div', { className: 'bx-ef-error-text bx-ef-hidden', textContent: 'End date cannot be before start date.' });
 
-        // Logic to validate dates, control limits, and execute
         function validateDates() {
             const valFrom = dateFromInput.value;
             const valTo = dateToInput.value;
@@ -401,19 +562,17 @@
             state.dateFrom = parseInputDateToLocal(valFrom, false);
             state.dateTo = parseInputDateToLocal(valTo, true);
 
-            // Constrain calendar pickers dynamically
             if (valFrom) dateToInput.setAttribute('min', valFrom);
             else dateToInput.removeAttribute('min');
 
             if (valTo) dateFromInput.setAttribute('max', valTo);
             else dateFromInput.removeAttribute('max');
 
-            // Handle manual typing of invalid ranges
             if (state.dateFrom && state.dateTo && state.dateFrom > state.dateTo) {
-                dateErrorMsg.classList.remove('bx-ef-hidden');
+                dateFromInput.classList.add('bx-ef-input-error');
                 dateToInput.classList.add('bx-ef-input-error');
             } else {
-                dateErrorMsg.classList.add('bx-ef-hidden');
+                dateFromInput.classList.remove('bx-ef-input-error');
                 dateToInput.classList.remove('bx-ef-input-error');
             }
 
@@ -425,17 +584,20 @@
 
         const btnUpcoming = el('button', {
             type: 'button',
+            'aria-pressed': state.showUpcoming.toString(),
             className: `bx-ef-toggle ${state.showUpcoming ? 'active' : ''}`,
             textContent: 'Upcoming Events',
             onClick: (e) => {
                 state.showUpcoming = !state.showUpcoming;
                 e.target.classList.toggle('active', state.showUpcoming);
+                e.target.setAttribute('aria-pressed', state.showUpcoming.toString());
                 executeFilter();
             }
         });
 
         const btnReset = el('button', {
             type: 'button',
+            id: 'bx-ef-reset-btn',
             className: 'bx-ef-toggle bx-ef-reset',
             textContent: 'Clear Filters',
             onClick: () => {
@@ -443,20 +605,31 @@
                 dateFromInput.value = '';
                 dateToInput.value = '';
                 state.query = '';
-                validateDates(); // Cleanly resets the date state, constraints, and triggers refilter
+
+                sortUpcomingSelect.value = 'date-asc';
+                state.sortUpcoming = 'date-asc';
+
+                if (state.isEventsPage) {
+                    sortPastSelect.value = 'date-desc';
+                    state.sortPast = 'date-desc';
+                }
+
+                validateDates();
             }
         });
 
-        const togglesContainer = el('div', { className: 'bx-ef-toggles' }, [btnUpcoming]);
+        const togglesContainer = el('div', { className: 'bx-ef-toggles', style: 'flex: 1;' }, [btnUpcoming]);
 
         if (state.isEventsPage) {
             const btnPast = el('button', {
                 type: 'button',
-                className: `bx-ef-toggle ${state.showPast ? 'active' : ''}`,
+                'aria-pressed': 'true',
+                className: 'bx-ef-toggle active',
                 textContent: 'Past Events',
                 onClick: (e) => {
                     state.showPast = !state.showPast;
                     e.target.classList.toggle('active', state.showPast);
+                    e.target.setAttribute('aria-pressed', state.showPast.toString());
                     executeFilter();
                 }
             });
@@ -467,19 +640,30 @@
 
         const panel = el('div', { id: 'bx-ef-panel', className: 'bx-ef-panel' }, [
             el('div', { className: 'bx-ef-row' }, [
-                el('div', { className: 'bx-ef-group', style: 'flex: 2;' }, [
-                    el('label', { className: 'bx-ef-label', textContent: 'Filter' }),
+                el('div', { className: 'bx-ef-group', style: 'flex: 3; min-width: 250px;' }, [
+                    el('label', { className: 'bx-ef-label', htmlFor: 'bx-ef-search', textContent: 'Filter' }),
                     searchInput
                 ]),
-                el('div', { className: 'bx-ef-group' }, [
-                    el('label', { className: 'bx-ef-label', textContent: 'Date Range' }),
-                    el('div', { className: 'bx-ef-date-container' }, [
-                        dateFromInput,
-                        el('span', { textContent: 'to', style: 'color: #6b7280; font-size: 0.85rem; font-weight: 600;' }),
-                        dateToInput
-                    ]),
-                    dateErrorMsg
+                el('div', { className: 'bx-ef-group', style: 'flex: 1; min-width: 140px;' }, [
+                    el('label', { className: 'bx-ef-label', htmlFor: 'bx-ef-date-from', textContent: 'From' }),
+                    dateFromInput
+                ]),
+                el('div', { className: 'bx-ef-group', style: 'flex: 1; min-width: 140px;' }, [
+                    el('label', { className: 'bx-ef-label', htmlFor: 'bx-ef-date-to', textContent: 'To' }),
+                    dateToInput
                 ])
+            ]),
+            el('div', { className: 'bx-ef-row' }, [
+                el('div', { className: 'bx-ef-group', style: 'flex: 1; min-width: 150px;' }, [
+                    el('label', { className: 'bx-ef-label', htmlFor: 'bx-ef-sort-upcoming', textContent: 'Sort Upcoming' }),
+                    sortUpcomingSelect
+                ]),
+                ...(state.isEventsPage ? [
+                    el('div', { className: 'bx-ef-group', style: 'flex: 1; min-width: 150px;' }, [
+                        el('label', { className: 'bx-ef-label', htmlFor: 'bx-ef-sort-past', textContent: 'Sort Past' }),
+                        sortPastSelect
+                    ])
+                ] : [])
             ]),
             el('div', { className: 'bx-ef-row', style: 'border-top: 1px solid #e5e7eb; padding-top: 16px;' }, [
                 togglesContainer,
@@ -488,6 +672,46 @@
         ]);
 
         return panel;
+    }
+
+    function initKeyboardNavigation() {
+        document.addEventListener('keydown', (e) => {
+            const searchInput = document.getElementById('bx-ef-search');
+            if (!searchInput) return;
+
+            if (e.key === 'Escape' && document.activeElement === searchInput) {
+                searchInput.blur();
+                return;
+            }
+
+            if ((e.key === '/' || (e.ctrlKey && e.key === 'k')) && !e.target.matches('input, textarea, select')) {
+                e.preventDefault();
+                searchInput.focus();
+            }
+        });
+    }
+
+    function setupInfiniteScroll() {
+        state.io = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const sec = entry.target.dataset.section;
+                    if (state.filtered[sec] && state.renderIndex[sec] < state.filtered[sec].length) {
+                        renderNextPage(sec);
+                    }
+                }
+            });
+        }, { rootMargin: '400px' });
+
+        ['upcoming', 'past'].forEach(sec => {
+            const containerSelector = sec === 'upcoming' ? CONFIG.SELECTORS.UPCOMING_CONTAINER : CONFIG.SELECTORS.PAST_CONTAINER;
+            const container = document.querySelector(containerSelector);
+            if (container && !document.getElementById(`bx-ef-sentinel-${sec}`)) {
+                const sentinel = el('div', { id: `bx-ef-sentinel-${sec}`, 'data-section': sec, style: 'height: 1px; width: 100%; clear: both;' });
+                container.appendChild(sentinel);
+                state.io.observe(sentinel);
+            }
+        });
     }
 
     function injectUI() {
@@ -499,12 +723,25 @@
             return;
         }
 
+        const filterPanel = buildFilterPanel();
+
+        const globalEmpty = el('div', { id: 'bx-ef-global-empty', className: 'bx-ef-empty-msg bx-ef-hidden' }, [
+            getIconSvg(),
+            el('div', { textContent: 'All Events Hidden', style: 'font-weight: 600; color: #111827; margin-bottom: 4px;' }),
+            el('div', { textContent: 'You have toggled off all event sections. Please enable Upcoming or Past events to view them.', style: 'font-size: 0.85rem;' })
+        ]);
+
         const firstEventsSection = document.querySelector('.events');
         if (firstEventsSection) {
-            firstEventsSection.parentNode.insertBefore(buildFilterPanel(), firstEventsSection);
+            firstEventsSection.parentNode.insertBefore(filterPanel, firstEventsSection);
+            firstEventsSection.parentNode.insertBefore(globalEmpty, firstEventsSection);
         } else {
-            mainContainer.prepend(buildFilterPanel());
+            mainContainer.prepend(globalEmpty);
+            mainContainer.prepend(filterPanel);
         }
+
+        initKeyboardNavigation();
+        setupInfiniteScroll();
     }
 
     // ==========================================
@@ -515,25 +752,36 @@
         const targetNode = document.querySelector(CONFIG.SELECTORS.TARGET_PARENT) || document.body;
 
         const observer = new MutationObserver((mutations) => {
-            let shouldReIndex = false;
+            if (state.isMutating) return;
+
+            let hasNewUnprocessed = false;
 
             for (const mutation of mutations) {
                 if (mutation.addedNodes.length > 0) {
                     for (const node of mutation.addedNodes) {
-                        if (node.nodeType === Node.ELEMENT_NODE &&
-                           (node.matches(CONFIG.SELECTORS.EVENT_CARD) || node.querySelector(CONFIG.SELECTORS.EVENT_CARD))) {
-                            shouldReIndex = true;
-                            break;
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            if (node.matches && node.matches(CONFIG.SELECTORS.EVENT_CARD) && node.dataset.bxProcessed !== 'true') {
+                                hasNewUnprocessed = true;
+                                break;
+                            }
+                            if (!hasNewUnprocessed && node.querySelector && node.querySelector(`${CONFIG.SELECTORS.EVENT_CARD}:not([data-bx-processed="true"])`)) {
+                                hasNewUnprocessed = true;
+                                break;
+                            }
                         }
                     }
                 }
-                if (shouldReIndex) break;
+                if (hasNewUnprocessed) break;
             }
 
-            if (shouldReIndex) {
-                log('Dynamic content detected. Re-indexing events.');
-                preprocessEvents();
-                executeFilter();
+            if (hasNewUnprocessed) {
+                log('New unprocessed events detected from site JS. Re-indexing...');
+                clearTimeout(state.observerTimer);
+                state.observerTimer = setTimeout(() => {
+                    if (preprocessEvents()) {
+                        executeFilter();
+                    }
+                }, CONFIG.DEBOUNCE_MS);
             }
         });
 
@@ -546,7 +794,7 @@
 
     function init() {
         try {
-            log('Initializing filter engine...');
+            log('Initializing filter engine v1.9...');
             injectStyles();
             injectUI();
             preprocessEvents();
