@@ -2,10 +2,10 @@
 // @name         [Eventbrite] Event Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://www.eventbrite.com/favicon.ico
-// @version      2.6
+// @version      2.7
 // @description  Extracts and groups unique event dates and venues from the management dashboard into a copyable list.
 // @author       Xiv
-// @match        *://*.eventbrite.com/*
+// @match        *://*.eventbrite.com/organizations/events*
 // @noframes
 // @grant        GM_addStyle
 // @grant        GM_getValue
