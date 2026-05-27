@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         [Boletos Express] Event Filter
-// @namespace    https://github.com/myouisaur/userscripts
+// @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://www.boletosexpress.com/favicon.ico
-// @version      1.9
-// @description  Adds advanced text, date range, section filtering, sorting, and smart infinite scroll to the Boletos Express promoter dashboard.
+// @version      2.0
+// @description  Adds advanced text, date range, section filtering, sorting, and high-performance infinite scroll to the Boletos Express promoter dashboard.
 // @author       Xiv
 // @match        *://*.boletosexpress.com/promoters/dashboard.php*
 // @match        *://*.boletosexpress.com/promoters/events.php*
@@ -25,7 +25,9 @@
     const CONFIG = {
         DEBUG: false,
         DEBOUNCE_MS: 250,
-        CHUNK_SIZE: 50, // Number of events to render per scroll tick (after initial load)
+        CHUNK_SIZE: 50, // Events to render per scroll tick
+        PROCESS_CHUNK_SIZE: 200, // Events to extract from DOM per animation frame
+        PAST_DAYS_LIMIT: 30, // Days to show for past events on initial load
         SELECTORS: {
             EVENT_CARD: '.event',
             UPCOMING_CONTAINER: '#upcoming_events',
@@ -54,6 +56,7 @@
         pool: [],
         filtered: { upcoming: [], past: [] },
         renderIndex: { upcoming: 0, past: 0 },
+        containers: { upcoming: null, past: null },
 
         totalEvents: 0,
         visibleEvents: 0,
@@ -297,40 +300,58 @@
     // INFINITE SCROLL & MEMORY MANAGEMENT
     // ==========================================
 
+    function initContainers() {
+        state.containers.upcoming = document.querySelector(CONFIG.SELECTORS.UPCOMING_CONTAINER);
+        state.containers.past = document.querySelector(CONFIG.SELECTORS.PAST_CONTAINER);
+    }
+
     function preprocessEvents() {
-        state.isMutating = true;
-        const events = document.querySelectorAll(CONFIG.SELECTORS.EVENT_CARD);
-        let addedNew = false;
+        return new Promise(resolve => {
+            state.isMutating = true;
+            // Target only events that haven't been processed yet
+            const events = document.querySelectorAll(`${CONFIG.SELECTORS.EVENT_CARD}:not([data-bx-processed="true"])`);
+            let addedNew = false;
+            let i = 0;
 
-        events.forEach(card => {
-            if (card.dataset.bxProcessed === 'true') return;
+            function processChunk() {
+                const end = Math.min(i + CONFIG.PROCESS_CHUNK_SIZE, events.length);
 
-            const searchStr = card.textContent.toLowerCase().trim();
-            const timeEl = card.querySelector(CONFIG.SELECTORS.TIME_ELEMENT);
-            const timestamp = timeEl ? parseEventDate(timeEl.textContent) : null;
-            const isPast = !!card.closest(CONFIG.SELECTORS.PAST_CONTAINER);
-            const section = isPast ? 'past' : 'upcoming';
+                for (; i < end; i++) {
+                    const card = events[i];
+                    const searchStr = card.textContent.toLowerCase().trim();
+                    const timeEl = card.querySelector(CONFIG.SELECTORS.TIME_ELEMENT);
+                    const timestamp = timeEl ? parseEventDate(timeEl.textContent) : null;
+                    const isPast = !!card.closest(CONFIG.SELECTORS.PAST_CONTAINER);
+                    const section = isPast ? 'past' : 'upcoming';
 
-            card.dataset.bxProcessed = 'true';
+                    card.dataset.bxProcessed = 'true';
 
-            state.pool.push({
-                el: card,
-                searchStr,
-                timestamp,
-                section
-            });
+                    state.pool.push({ el: card, searchStr, timestamp, section });
 
-            // Instantly remove to clear browser memory constraints
-            card.remove();
-            addedNew = true;
+                    // Instantly remove to clear browser memory constraints
+                    card.remove();
+                    addedNew = true;
+                }
+
+                if (i < events.length) {
+                    // Yield to main thread to prevent UI freezing on massive payloads
+                    requestAnimationFrame(processChunk);
+                } else {
+                    if (addedNew) {
+                        state.totalEvents = state.pool.length;
+                    }
+                    setTimeout(() => { state.isMutating = false; }, 0);
+                    resolve(addedNew);
+                }
+            }
+
+            if (events.length > 0) {
+                processChunk();
+            } else {
+                state.isMutating = false;
+                resolve(false);
+            }
         });
-
-        if (addedNew) {
-            state.totalEvents = state.pool.length;
-        }
-
-        setTimeout(() => { state.isMutating = false; }, 0);
-        return addedNew;
     }
 
     function sortFilteredEvents(section, sortVal) {
@@ -347,8 +368,7 @@
     }
 
     function renderNextPage(section, targetEndIndex = null) {
-        const containerSelector = section === 'upcoming' ? CONFIG.SELECTORS.UPCOMING_CONTAINER : CONFIG.SELECTORS.PAST_CONTAINER;
-        const container = document.querySelector(containerSelector);
+        const container = state.containers[section];
         if (!container) return;
 
         const sentinel = document.getElementById(`bx-ef-sentinel-${section}`);
@@ -424,12 +444,13 @@
         // UPCOMING: Render all events instantly
         renderNextPage('upcoming', state.filtered.upcoming.length);
 
-        // PAST: Render everything up to 30 days old instantly
-        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        // PAST: Render everything up to the cutoff limit instantly
+        const limitMs = CONFIG.PAST_DAYS_LIMIT * 24 * 60 * 60 * 1000;
+        const cutoffDate = Date.now() - limitMs;
         let pastInitialCount = 0;
 
         for (let i = 0; i < state.filtered.past.length; i++) {
-            if (state.filtered.past[i].timestamp >= thirtyDaysAgo) {
+            if (state.filtered.past[i].timestamp >= cutoffDate) {
                 pastInitialCount++;
             } else if (state.sortPast === 'date-desc') {
                 break;
@@ -614,6 +635,12 @@
                     state.sortPast = 'date-desc';
                 }
 
+                // Hard strip all constraint attributes
+                dateFromInput.removeAttribute('max');
+                dateToInput.removeAttribute('min');
+                dateFromInput.classList.remove('bx-ef-input-error');
+                dateToInput.classList.remove('bx-ef-input-error');
+
                 validateDates();
             }
         });
@@ -692,6 +719,9 @@
     }
 
     function setupInfiniteScroll() {
+        // Disconnect old observer if rebuilding after SPA load
+        if (state.io) state.io.disconnect();
+
         state.io = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
@@ -704,8 +734,7 @@
         }, { rootMargin: '400px' });
 
         ['upcoming', 'past'].forEach(sec => {
-            const containerSelector = sec === 'upcoming' ? CONFIG.SELECTORS.UPCOMING_CONTAINER : CONFIG.SELECTORS.PAST_CONTAINER;
-            const container = document.querySelector(containerSelector);
+            const container = state.containers[sec];
             if (container && !document.getElementById(`bx-ef-sentinel-${sec}`)) {
                 const sentinel = el('div', { id: `bx-ef-sentinel-${sec}`, 'data-section': sec, style: 'height: 1px; width: 100%; clear: both;' });
                 container.appendChild(sentinel);
@@ -741,7 +770,6 @@
         }
 
         initKeyboardNavigation();
-        setupInfiniteScroll();
     }
 
     // ==========================================
@@ -755,32 +783,41 @@
             if (state.isMutating) return;
 
             let hasNewUnprocessed = false;
+            let containersReplaced = false;
 
             for (const mutation of mutations) {
                 if (mutation.addedNodes.length > 0) {
                     for (const node of mutation.addedNodes) {
                         if (node.nodeType === Node.ELEMENT_NODE) {
+
+                            // Check if the site completely swapped out the container wrappers (SPA Navigation)
+                            if (node.matches(CONFIG.SELECTORS.UPCOMING_CONTAINER) || node.matches(CONFIG.SELECTORS.PAST_CONTAINER)) {
+                                containersReplaced = true;
+                            }
+
+                            // Check for raw events
                             if (node.matches && node.matches(CONFIG.SELECTORS.EVENT_CARD) && node.dataset.bxProcessed !== 'true') {
                                 hasNewUnprocessed = true;
-                                break;
-                            }
-                            if (!hasNewUnprocessed && node.querySelector && node.querySelector(`${CONFIG.SELECTORS.EVENT_CARD}:not([data-bx-processed="true"])`)) {
+                            } else if (!hasNewUnprocessed && node.querySelector && node.querySelector(`${CONFIG.SELECTORS.EVENT_CARD}:not([data-bx-processed="true"])`)) {
                                 hasNewUnprocessed = true;
-                                break;
                             }
                         }
                     }
                 }
-                if (hasNewUnprocessed) break;
+            }
+
+            if (containersReplaced) {
+                log('Containers replaced by site framework. Re-initializing containers and sentinels...');
+                initContainers();
+                setupInfiniteScroll();
             }
 
             if (hasNewUnprocessed) {
                 log('New unprocessed events detected from site JS. Re-indexing...');
                 clearTimeout(state.observerTimer);
-                state.observerTimer = setTimeout(() => {
-                    if (preprocessEvents()) {
-                        executeFilter();
-                    }
+                state.observerTimer = setTimeout(async () => {
+                    const added = await preprocessEvents();
+                    if (added) executeFilter();
                 }, CONFIG.DEBOUNCE_MS);
             }
         });
@@ -792,12 +829,17 @@
     // BOOTSTRAP
     // ==========================================
 
-    function init() {
+    async function init() {
         try {
-            log('Initializing filter engine v1.9...');
+            log('Initializing filter engine v2.0...');
             injectStyles();
             injectUI();
-            preprocessEvents();
+            initContainers();
+
+            // Wait for initial bulk extraction to finish off main-thread
+            await preprocessEvents();
+
+            setupInfiniteScroll();
             executeFilter();
             setupObserver();
         } catch (error) {
