@@ -2,10 +2,10 @@
 // @name         [POSH] Ticket Manager
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://posh.vip/favicon.ico
-// @version      11.0
+// @version      11.8
 // @description  Automatically creates, edits, and deletes event tickets in bulk using a queue-based interface.
 // @author       Xiv
-// @match        *://*.posh.vip/*/events/*/tickets*
+// @match        *://*.posh.vip/*
 // @noframes
 // @grant        GM_addStyle
 // @updateURL    https://myouisaur.github.io/Work_CN/posh_ticket-manager.user.js
@@ -38,7 +38,8 @@
             MAX_TRIES: 15,
             INTERVAL: 300,
             LIMIT_RENDER_TRIES: 20,
-            LIMIT_RENDER_INTERVAL: 150
+            LIMIT_RENDER_INTERVAL: 150,
+            ASSERTER: 500
         },
         RETRIES: {
             TYPING_VERIFICATION: 3,
@@ -65,7 +66,8 @@
         },
         STRINGS: {
             WARN_DELETE_ALL: '⚠️ WARNING: This will permanently delete ALL tickets. Proceed?',
-            WARN_DELETE_SINGLE: '⚠️ Are you sure you want to delete this specific ticket?'
+            WARN_DELETE_SINGLE: '⚠️ Are you sure you want to delete this specific ticket?',
+            TRASH_SVG: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`
         }
     };
 
@@ -78,32 +80,40 @@
     };
 
     // ==========================================
+    // KILL SWITCH & STATE MANAGEMENT
+    // ==========================================
+    function setRunningState(isRun) {
+        STATE.isRunning = isRun;
+    }
+
+    // ==========================================
     // AUDIO ENGINE (Web Audio API Synthesis)
     // ==========================================
+    let sharedAudioCtx = null;
     function playAudioAlert(type) {
         try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-            const ctx = new AudioContext();
+            if (!sharedAudioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) sharedAudioCtx = new AudioContext();
+            }
+            if (!sharedAudioCtx) return;
+            if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume();
 
             const playTone = (note) => {
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
+                const osc = sharedAudioCtx.createOscillator();
+                const gain = sharedAudioCtx.createGain();
                 osc.type = note.type;
-                osc.frequency.setValueAtTime(note.freq, ctx.currentTime + note.start);
-                gain.gain.setValueAtTime(note.vol, ctx.currentTime + note.start);
-                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + note.start + note.dur);
+                osc.frequency.setValueAtTime(note.freq, sharedAudioCtx.currentTime + note.start);
+                gain.gain.setValueAtTime(note.vol, sharedAudioCtx.currentTime + note.start);
+                gain.gain.exponentialRampToValueAtTime(0.01, sharedAudioCtx.currentTime + note.start + note.dur);
                 osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start(ctx.currentTime + note.start);
-                osc.stop(ctx.currentTime + note.start + note.dur);
+                gain.connect(sharedAudioCtx.destination);
+                osc.start(sharedAudioCtx.currentTime + note.start);
+                osc.stop(sharedAudioCtx.currentTime + note.start + note.dur);
             };
 
-            if (type === 'success' && CONFIG.AUDIO.SUCCESS) {
-                CONFIG.AUDIO.SUCCESS.forEach(playTone);
-            } else if (type === 'error' && CONFIG.AUDIO.ERROR) {
-                CONFIG.AUDIO.ERROR.forEach(playTone);
-            }
+            if (type === 'success' && CONFIG.AUDIO.SUCCESS) CONFIG.AUDIO.SUCCESS.forEach(playTone);
+            else if (type === 'error' && CONFIG.AUDIO.ERROR) CONFIG.AUDIO.ERROR.forEach(playTone);
         } catch (e) {
             console.error('Audio alert failed:', e);
         }
@@ -183,23 +193,68 @@
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
     }
 
+    async function getTipTapText(editor) {
+        if (!editor) return '';
+        editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await delay(100);
+        editor.focus();
+        editor.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+        await delay(200);
+
+        const paragraphs = Array.from(editor.querySelectorAll('p'));
+        return paragraphs.length > 0 ? paragraphs.map(p => p.textContent).join('\n') : editor.textContent;
+    }
+
+    async function setTipTapText(editor, text) {
+        if (!editor || text === undefined) return;
+        editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await delay(100);
+        editor.focus();
+        editor.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+        await delay(100);
+
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        await delay(100);
+
+        const htmlContent = text.split('\n').map(line => `<p>${line || '<br>'}</p>`).join('');
+        const dataTransfer = new DataTransfer();
+        dataTransfer.setData('text/html', htmlContent);
+        dataTransfer.setData('text/plain', text);
+
+        const pasteEvent = new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true });
+        editor.dispatchEvent(pasteEvent);
+        if (editor.textContent.trim() === '') {
+            editor.innerHTML = htmlContent;
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        await delay(300);
+        editor.blur();
+        editor.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+        await delay(100);
+    }
+
     // ==========================================
-    // STYLES (Tailwind/Radix Mimic & Toast)
+    // STYLES (Tailwind/Radix Mimic, Toast & Progress)
     // ==========================================
     GM_addStyle(`
         .xiv-modal-overlay { position: fixed; inset: 0; z-index: 99999; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; pointer-events: auto !important; }
-        .xiv-modal-content { background: #0a0a0a; border: 1px solid #222; border-radius: 1rem; width: 100%; max-width: 1000px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .xiv-modal-content { background: #0a0a0a; border: 1px solid #222; border-radius: 1rem; width: 90vw; max-width: 90vw; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
         .xiv-modal-header { padding: 1.5rem; border-bottom: 1px solid #222; }
         .xiv-modal-title { margin: 0; font-size: 1.25rem; font-weight: 600; color: #fff; }
         .xiv-modal-body { padding: 1.5rem; overflow-y: auto; flex: 1; }
         .xiv-modal-footer { padding: 1.5rem; border-top: 1px solid #222; display: flex; justify-content: space-between; align-items: center; }
 
-        .xiv-grid-header { display: grid; grid-template-columns: 2.5fr 1fr 1fr 1fr 1fr 3.5fr auto; gap: 0.75rem; margin-bottom: 0.5rem; padding: 0 0.5rem; }
+        .xiv-grid-header { display: grid; grid-template-columns: 4fr 1fr 1fr 1fr 1fr 6fr auto; gap: 0.75rem; margin-bottom: 0.5rem; padding: 0 0.5rem; }
         .xiv-grid-label { font-size: 0.75rem; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
 
         .xiv-row-container { margin-bottom: 0.5rem; border: 1px solid transparent; border-radius: 0.5rem; transition: background 0.2s; }
         .xiv-row-container:hover { background: #111; border-color: #222; }
-        .xiv-grid-row { display: grid; grid-template-columns: 2.5fr 1fr 1fr 1fr 1fr 3.5fr auto; gap: 0.75rem; align-items: start; padding: 0.5rem; }
+        .xiv-grid-row { display: grid; grid-template-columns: 4fr 1fr 1fr 1fr 1fr 6fr auto; gap: 0.75rem; align-items: start; padding: 0.5rem; }
 
         .xiv-input { width: 100%; background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 0.6rem 0.75rem; border-radius: 0.5rem; font-size: 0.875rem; outline: none; transition: border 0.2s; box-sizing: border-box; }
         .xiv-input:focus { border-color: #666; }
@@ -216,15 +271,34 @@
         .xiv-btn-secondary { background: transparent; color: #888; }
         .xiv-btn-secondary:hover { color: #fff; }
 
-        .xiv-toast { position: fixed; bottom: 1.5rem; left: 1.5rem; z-index: 999999; background: #111; border: 1px solid #333; color: #fff; padding: 1rem 1.5rem; border-radius: 0.5rem; font-family: system-ui, sans-serif; font-size: 0.875rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 0.75rem; transition: all 0.3s ease; transform: translateY(100px); opacity: 0; pointer-events: none; }
-        .xiv-toast.xiv-toast-show { transform: translateY(0); opacity: 1; }
-        .xiv-toast-success { border-color: #22c55e; color: #4ade80; }
-        .xiv-toast-error { border-color: #ef4444; color: #f87171; }
+        /* Modernized Integrated Toast */
+        .xiv-toast { position: fixed; bottom: 1.5rem; left: 1.5rem; z-index: 999999; background: #111; border: 1px solid #333; color: #fff; padding: 1rem 1.5rem; border-radius: 0.5rem; font-family: system-ui, sans-serif; font-size: 0.875rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 0.75rem; transition: all 0.3s ease; transform: translateY(100px); opacity: 0; pointer-events: none; min-width: 300px; max-width: 90vw; }
+        .xiv-toast.xiv-toast-show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+        .xiv-toast-success { border-color: #22c55e; }
+        .xiv-toast-error { border-color: #ef4444; }
+
+        .xiv-toast-body { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+        .xiv-toast-text { display: flex; align-items: center; gap: 0.75rem; flex: 1; line-height: 1.4; }
+
+        /* Spinner & Progress */
+        .xiv-spinner { width: 18px; height: 18px; min-width: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: xiv-spin 1s linear infinite; }
+        .xiv-toast-progress-bg { width: 100%; height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
+        .xiv-toast-progress-fill { height: 100%; background: #fff; width: 0%; transition: width 0.3s ease; }
+        .xiv-toast-success .xiv-toast-progress-fill { background: #22c55e; }
+        .xiv-toast-error .xiv-toast-progress-fill { background: #ef4444; }
+
+        /* Integrated Stop Button */
+        .xiv-toast-stop-btn { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.5); color: #ef4444; border-radius: 0.25rem; padding: 0.35rem 0.6rem; cursor: pointer; transition: all 0.2s; font-size: 0.75rem; font-weight: 600; display: flex; align-items: center; gap: 0.35rem; pointer-events: auto; outline: none; }
+        .xiv-toast-stop-btn:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
+        .xiv-toast-stop-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        @keyframes xiv-spin { to { transform: rotate(360deg); } }
 
         /* Custom Native Injection Styles */
         .xiv-native-delete-btn { background: transparent; border: none; cursor: pointer; color: white; opacity: 1; transition: all 0.2s; padding: 0; display: inline-flex; align-items: center; justify-content: center; outline: none; }
         .xiv-native-delete-btn:hover { color: #ef4444; transform: scale(1.15); }
         .xiv-native-delete-btn svg { width: 16px; height: 16px; }
+        .xiv-icon-container-mod { width: auto !important; display: flex !important; align-items: center !important; gap: 8px !important; }
 
         /* Flavor Modifiers for Native poshBtn */
         .xiv-flavor-add { background-color: #222 !important; color: #fff !important; border: 1px solid #333 !important; }
@@ -236,7 +310,7 @@
     `);
 
     // ==========================================
-    // TOAST NOTIFICATION LOGIC
+    // TOAST NOTIFICATION LOGIC (Progress & Stop-Aware)
     // ==========================================
     function showToast(htmlMessage, type = 'info') {
         let toast = document.getElementById('xiv-automation-toast');
@@ -249,7 +323,40 @@
         if (type === 'success') toast.classList.add('xiv-toast-success');
         if (type === 'error') toast.classList.add('xiv-toast-error');
 
-        toast.innerHTML = htmlMessage;
+        // Dynamically parse progress (e.g., "(2/5)") from the message
+        let progressHtml = '';
+        const progressMatch = htmlMessage.match(/\((\d+)\/(\d+)\)/);
+        if (progressMatch && !isNaN(parseInt(progressMatch[2]))) {
+            const pct = Math.min(100, Math.max(0, (parseInt(progressMatch[1]) / parseInt(progressMatch[2])) * 100));
+            progressHtml = `<div class="xiv-toast-progress-bg"><div class="xiv-toast-progress-fill" style="width: ${pct}%"></div></div>`;
+        }
+
+        const spinnerHtml = type === 'info' ? `<div class="xiv-spinner"></div>` : '';
+
+        let stopHtml = '';
+        if (STATE.isRunning && type === 'info') {
+            stopHtml = `<button id="xiv-toast-stop-btn" class="xiv-toast-stop-btn" title="Stop Automation"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14"></rect></svg> Stop</button>`;
+        }
+
+        toast.innerHTML = `
+            <div class="xiv-toast-body">
+                <div class="xiv-toast-text">${spinnerHtml} <span>${htmlMessage}</span></div>
+                ${stopHtml}
+            </div>
+            ${progressHtml}
+        `;
+
+        const stopBtn = document.getElementById('xiv-toast-stop-btn');
+        if (stopBtn) {
+            stopBtn.onclick = () => {
+                setRunningState(false);
+                stopBtn.disabled = true;
+                stopBtn.innerHTML = 'Stopping...';
+                stopBtn.style.opacity = '0.5';
+                showToast('🛑 Automation manually aborted.', 'error');
+                playAudioAlert('error');
+            };
+        }
     }
 
     function removeToast(delayMs = 0) {
@@ -321,7 +428,6 @@
 
         content.appendChild(el('div', { className: 'xiv-modal-header' }, el('h2', { className: 'xiv-modal-title' }, STATE.isEditMode ? 'Bulk Edit Tickets' : 'Create Multiple Tickets')));
         const body = el('div', { className: 'xiv-modal-body', id: 'xiv-modal-body' });
-
         body.appendChild(el('div', { className: 'xiv-grid-header' },
             el('div', { className: 'xiv-grid-label' }, 'Name'), el('div', { className: 'xiv-grid-label' }, 'Qty'),
             el('div', { className: 'xiv-grid-label' }, 'Price'), el('div', { className: 'xiv-grid-label' }, 'Min'),
@@ -357,6 +463,7 @@
 
             const nameInput = el('input', { className: 'xiv-input', placeholder: 'General Admission', value: row.name, onInput: (e) => updateRow(row.id, 'name', e.target.value) });
             grid.appendChild(nameInput);
+
             grid.appendChild(el('input', { className: 'xiv-input', type: 'number', placeholder: 'Unltd', value: row.qty, onInput: (e) => updateRow(row.id, 'qty', e.target.value) }));
             grid.appendChild(el('input', { className: 'xiv-input', type: 'number', placeholder: 'Free', value: row.price, onInput: (e) => updateRow(row.id, 'price', e.target.value) }));
             grid.appendChild(el('input', { className: 'xiv-input', type: 'number', placeholder: '1', value: row.min, onInput: (e) => updateRow(row.id, 'min', e.target.value) }));
@@ -374,7 +481,6 @@
             });
             setTimeout(() => { if (descArea.value) { descArea.style.height = 'auto'; descArea.style.height = (descArea.scrollHeight) + 'px'; } }, 0);
             grid.appendChild(descArea);
-
             const actions = el('div', { style: { display: 'flex', gap: '0.25rem' } },
                 el('button', { className: 'xiv-icon-btn xiv-icon-danger', title: 'Delete', onClick: () => removeRow(row.id) }, '🗑️')
             );
@@ -398,37 +504,44 @@
     }
 
     function injectNativeUI() {
-        if (STATE.modalOpen) return;
+        if (STATE.modalOpen || STATE.isRunning) return;
 
         // 1. Inject Main Buttons
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const nativeBtn = buttons.find(b => b.textContent.toLowerCase().includes('add ticket') && !b.id.includes('xiv'));
+        if (!document.getElementById('xiv-bulk-trigger')) {
+            const buttons = document.getElementsByTagName('button');
+            let nativeBtn = null;
 
-        if (nativeBtn && nativeBtn.parentElement && !document.getElementById('xiv-bulk-trigger')) {
-            const bulkAddBtn = el('button', {
-                id: 'xiv-bulk-trigger',
-                className: 'poshBtn xiv-flavor-add',
-                style: { textTransform: 'capitalize', marginLeft: '8px' },
-                onClick: () => { STATE.isEditMode = false; STATE.rows = []; openModal(); }
-            }, 'Bulk Add');
+            for (let i = 0; i < buttons.length; i++) {
+                if (buttons[i].textContent.toLowerCase().includes('add ticket') && !buttons[i].id.includes('xiv')) {
+                    nativeBtn = buttons[i];
+                    break;
+                }
+            }
 
-            const bulkEditBtn = el('button', {
-                id: 'xiv-edit-trigger',
-                className: 'poshBtn xiv-flavor-edit',
-                style: { textTransform: 'capitalize', marginLeft: '8px' },
-                onClick: scrapeExistingTickets
-            }, 'Bulk Edit');
+            if (nativeBtn && nativeBtn.parentElement) {
+                const bulkAddBtn = el('button', {
+                    id: 'xiv-bulk-trigger',
+                    className: 'poshBtn xiv-flavor-add',
+                    style: { textTransform: 'capitalize', marginLeft: '8px' },
+                    onClick: () => { STATE.isEditMode = false; STATE.rows = []; openModal(); }
+                }, 'Bulk Add');
+                const bulkEditBtn = el('button', {
+                    id: 'xiv-edit-trigger',
+                    className: 'poshBtn xiv-flavor-edit',
+                    style: { textTransform: 'capitalize', marginLeft: '8px' },
+                    onClick: scrapeExistingTickets
+                }, 'Bulk Edit');
+                const deleteBtn = el('button', {
+                    id: 'xiv-delete-trigger',
+                    className: 'poshBtn xiv-flavor-delete',
+                    style: { textTransform: 'capitalize', marginLeft: '8px' },
+                    onClick: startDeleteAllAutomation
+                }, 'Delete All');
 
-            const deleteBtn = el('button', {
-                id: 'xiv-delete-trigger',
-                className: 'poshBtn xiv-flavor-delete',
-                style: { textTransform: 'capitalize', marginLeft: '8px' },
-                onClick: startDeleteAllAutomation
-            }, 'Delete All');
-
-            nativeBtn.after(bulkAddBtn);
-            bulkAddBtn.after(bulkEditBtn);
-            bulkEditBtn.after(deleteBtn);
+                nativeBtn.after(bulkAddBtn);
+                bulkAddBtn.after(bulkEditBtn);
+                bulkEditBtn.after(deleteBtn);
+            }
         }
 
         // 2. Inject Single Row Delete Buttons
@@ -442,18 +555,14 @@
                         const iconContainer = targetTd.querySelector('div[class*="ActionButtons"]') || targetTd.querySelector('div') || targetTd;
 
                         if (iconContainer) {
-                            if (iconContainer.style.width) iconContainer.style.width = 'auto';
-                            if (iconContainer.style.display !== 'flex') {
-                                iconContainer.style.display = 'flex';
-                                iconContainer.style.alignItems = 'center';
-                                iconContainer.style.gap = '8px';
+                            if (!iconContainer.classList.contains('xiv-icon-container-mod')) {
+                                iconContainer.classList.add('xiv-icon-container-mod');
                             }
 
                             const delBtn = document.createElement('button');
                             delBtn.className = 'xiv-native-delete-btn';
                             delBtn.title = 'Quick Delete';
-                            delBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`;
-
+                            delBtn.innerHTML = CONFIG.STRINGS.TRASH_SVG;
                             delBtn.onclick = (e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -473,14 +582,14 @@
     // ==========================================
     async function scrapeExistingTickets() {
         if (STATE.isRunning) return;
-        STATE.isRunning = true;
+        setRunningState(true);
         STATE.rows = [];
 
         const tableWrap = document.querySelector(CONFIG.SELECTORS.TABLE_WRAPPER);
         if (!tableWrap) {
             showToast('❌ No tickets found to edit.', 'error');
             playAudioAlert('error');
-            STATE.isRunning = false;
+            setRunningState(false);
             return;
         }
 
@@ -488,13 +597,14 @@
         if (initialCount === 0) {
             showToast('❌ No tickets found to edit.', 'error');
             playAudioAlert('error');
-            STATE.isRunning = false;
+            setRunningState(false);
             return;
         }
 
         for (let i = 0; i < initialCount; i++) {
-            showToast(`🔍 Reading ticket data (${i+1}/${initialCount})...`, 'info');
+            if (!STATE.isRunning) break; // Check Kill Switch
 
+            showToast(`🔍 Reading ticket data (${i+1}/${initialCount})...`, 'info');
             if (i > 0) await delay(CONFIG.DELAYS.LOOP_SETTLE);
 
             try {
@@ -505,14 +615,12 @@
 
                 targetRow.click();
                 await delay(CONFIG.DELAYS.MODAL_OPEN);
-
                 const activeModal = getActivePoshModal();
                 if (!activeModal) throw new Error('Modal failed to open for scraping');
 
                 const inputs = Array.from(activeModal.querySelectorAll('input'));
                 const nameInp = inputs.find(inp => inp.name === 'name' || inp.placeholder.toLowerCase().includes('name'));
                 const qtyInp = inputs.find(inp => inp.placeholder.toLowerCase().includes('unlimited') || inp.id.includes('qty'));
-
                 const priceInpRaw = inputs.find(inp => inp.placeholder.toLowerCase().includes('free') || inp.id.includes('price') || inp.name.includes('price'));
                 let cleanedPrice = '';
                 if (priceInpRaw && priceInpRaw.value) {
@@ -528,19 +636,7 @@
                 const limitInputs = Array.from(activeModal.querySelectorAll(CONFIG.SELECTORS.NUMERIC_INPUTS)).filter(inp => inp.placeholder === '1' || inp.placeholder === '1000');
                 if (limitInputs.length >= 2) { min = limitInputs[0].value; max = limitInputs[1].value; }
 
-                let desc = '';
-                const editor = activeModal.querySelector(CONFIG.SELECTORS.TIPTAP_EDITOR);
-                if (editor) {
-                    editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    await delay(100);
-                    editor.focus();
-                    editor.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-                    await delay(200);
-
-                    const paragraphs = Array.from(editor.querySelectorAll('p'));
-                    if (paragraphs.length > 0) desc = paragraphs.map(p => p.textContent).join('\n');
-                    else desc = editor.textContent;
-                }
+                const desc = await getTipTapText(activeModal.querySelector(CONFIG.SELECTORS.TIPTAP_EDITOR));
 
                 addRow({
                     rowIndex: i,
@@ -555,7 +651,6 @@
                     price: cleanedPrice,
                     min: min, max: max, desc: desc
                 });
-
                 forceCloseModal(activeModal);
 
                 for (let w = 0; w < CONFIG.POLLING.MAX_TRIES; w++) {
@@ -570,7 +665,9 @@
             }
         }
 
-        STATE.isRunning = false;
+        if (!STATE.isRunning) return; // Check if aborted mid-flight
+
+        setRunningState(false);
         STATE.isEditMode = true;
         showToast('✅ Finished reading ticket data!', 'success');
         playAudioAlert('success');
@@ -585,12 +682,11 @@
         if (!confirm(CONFIG.STRINGS.WARN_DELETE_ALL)) return;
         if (STATE.isRunning) return;
 
-        STATE.isRunning = true;
+        setRunningState(true);
         closeModal();
         let failures = 0;
         let deletedCount = 1;
         let totalTickets = 0;
-
         const initTable = document.querySelector(CONFIG.SELECTORS.TABLE_WRAPPER);
         if (initTable) {
             totalTickets = Array.from(initTable.querySelectorAll('tbody tr')).filter(tr => tr.children.length > 1).length;
@@ -602,17 +698,13 @@
 
             const validRows = Array.from(tableWrap.querySelectorAll('tbody tr')).filter(tr => tr.children.length > 1);
             if (validRows.length === 0) break;
-
             const editTrigger = validRows[0];
             showToast(`🗑️ Deleting ticket (${deletedCount}/${totalTickets || '?'})...`, 'info');
-
             try {
                 editTrigger.click();
                 await delay(CONFIG.DELAYS.MODAL_OPEN);
-
                 const activeModal = getActivePoshModal();
                 if (!activeModal) throw new Error('Edit modal did not open. Row might be invalid.');
-
                 const labels = Array.from(activeModal.querySelectorAll('label'));
                 const delLabel = labels.find(l => l.textContent.includes('Delete Ticket'));
                 let trashSvg = delLabel ? (delLabel.parentElement.querySelector(CONFIG.SELECTORS.TRASH_ICON) || delLabel.nextElementSibling) : activeModal.querySelector(CONFIG.SELECTORS.TRASH_ICON);
@@ -621,7 +713,6 @@
 
                 syntheticClick(trashSvg, true);
                 await delay(800);
-
                 const confirmBtns = Array.from(activeModal.querySelectorAll('button')).filter(b =>
                     b.textContent.toLowerCase().includes('delete') || b.textContent.toLowerCase().includes('confirm') || b.textContent.toLowerCase().includes('yes')
                 );
@@ -641,7 +732,7 @@
                 if (failures >= CONFIG.RETRIES.MAX_FAILURES) {
                     showToast('❌ Too many failures, stopping deletion.', 'error');
                     playAudioAlert('error');
-                    STATE.isRunning = false;
+                    setRunningState(false);
                     return;
                 }
                 forceCloseModal();
@@ -649,19 +740,20 @@
             }
         }
 
+        if (!STATE.isRunning && deletedCount > 1) return; // Only show success if naturally finished
+
         showToast('✅ All tickets deleted.', 'success');
         playAudioAlert('success');
         removeToast(CONFIG.DELAYS.TOAST_LONG);
-        STATE.isRunning = false;
+        setRunningState(false);
     }
 
     async function startSingleDelete(targetRow) {
         if (!confirm(CONFIG.STRINGS.WARN_DELETE_SINGLE)) return;
         if (STATE.isRunning) return;
 
-        STATE.isRunning = true;
+        setRunningState(true);
         showToast(`🗑️ Deleting ticket...`, 'info');
-
         try {
             targetRow.click();
             await delay(CONFIG.DELAYS.MODAL_OPEN);
@@ -697,7 +789,7 @@
             playAudioAlert('error');
             forceCloseModal();
         } finally {
-            STATE.isRunning = false;
+            setRunningState(false);
         }
     }
 
@@ -707,7 +799,6 @@
 
     async function setReactValueAsync(input, value) {
         if (!input || value === '' || value === undefined) return;
-
         for (let attempt = 1; attempt <= CONFIG.RETRIES.TYPING_VERIFICATION; attempt++) {
             input.scrollIntoView({ behavior: 'smooth', block: 'center' });
             await delay(100);
@@ -724,7 +815,6 @@
 
             try { input.select(); } catch(e) {}
             await delay(100);
-
             setter.call(input, '');
             input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -773,7 +863,6 @@
             await delay(100);
 
             target.click();
-
             for (let i = 0; i < CONFIG.POLLING.MAX_TRIES; i++) {
                 await delay(150);
                 if (target.getAttribute('aria-checked') === String(state)) break;
@@ -787,13 +876,14 @@
         if (validRows.length === 0) return setStatus('Please enter at least one ticket name.', true);
 
         if (STATE.isRunning) return;
-        STATE.isRunning = true;
+        setRunningState(true);
         closeModal();
 
         for (let i = 0; i < validRows.length; i++) {
+            if (!STATE.isRunning) break; // Check Kill Switch
+
             const ticket = validRows[i];
             const isUpdate = STATE.isEditMode && ticket.rowIndex !== undefined && ticket.rowIndex >= 0;
-
             if (isUpdate) {
                 const hasChanges =
                     ticket.name.trim() !== ticket.originalName.trim() ||
@@ -802,7 +892,6 @@
                     ticket.min.trim() !== ticket.originalMin.trim() ||
                     ticket.max.trim() !== ticket.originalMax.trim() ||
                     ticket.desc.trim() !== ticket.originalDesc.trim();
-
                 if (!hasChanges) {
                     showToast(`⏭️ No changes for <strong>${ticket.name}</strong>. Skipping...`, 'info');
                     continue;
@@ -810,7 +899,6 @@
             }
 
             showToast(`⏳ ${isUpdate ? 'Updating' : 'Processing'} (${i+1}/${validRows.length}): <strong>${ticket.name}</strong>...`, 'info');
-
             if (i > 0) await delay(CONFIG.DELAYS.LOOP_SETTLE);
 
             try {
@@ -821,7 +909,14 @@
                     if (!targetRow) throw new Error(`Ticket row index ${ticket.rowIndex} not found on page.`);
                     syntheticClick(targetRow, true);
                 } else {
-                    const addBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Add Ticket') && !b.id.includes('xiv'));
+                    const buttons = document.getElementsByTagName('button');
+                    let addBtn = null;
+                    for (let j = 0; j < buttons.length; j++) {
+                        if (buttons[j].textContent.includes('Add Ticket') && !buttons[j].id.includes('xiv')) {
+                            addBtn = buttons[j];
+                            break;
+                        }
+                    }
                     if (addBtn && !addBtn.disabled) {
                         syntheticClick(addBtn, true);
                     }
@@ -829,14 +924,12 @@
                 }
 
                 await delay(CONFIG.DELAYS.MODAL_OPEN);
-
                 const activeModal = getActivePoshModal();
                 if (!activeModal) throw new Error('POSH modal missing or not active');
 
                 // PHASE 1: LIMITS
                 if (ticket.min || ticket.max) {
                     await ensureSwitch(activeModal, 'limit-purchase-quantity', true);
-
                     let limitInputs = [];
                     for (let w = 0; w < CONFIG.POLLING.LIMIT_RENDER_TRIES; w++) {
                         limitInputs = Array.from(activeModal.querySelectorAll(CONFIG.SELECTORS.NUMERIC_INPUTS)).filter(inp => inp.placeholder === '1' || inp.placeholder === '1000');
@@ -845,9 +938,7 @@
                     }
 
                     await delay(CONFIG.DELAYS.HYDRATION_BUFFER);
-
                     limitInputs = Array.from(activeModal.querySelectorAll(CONFIG.SELECTORS.NUMERIC_INPUTS)).filter(inp => inp.placeholder === '1' || inp.placeholder === '1000');
-
                     if (limitInputs.length >= 2) {
                         await setReactValueAsync(limitInputs[0], ticket.min);
                         await delay(300);
@@ -857,39 +948,7 @@
 
                 // PHASE 2: DESCRIPTION
                 if (ticket.desc !== undefined) {
-                    const editor = activeModal.querySelector(CONFIG.SELECTORS.TIPTAP_EDITOR);
-                    if (editor) {
-                        editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        await delay(100);
-                        editor.focus();
-                        editor.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-                        await delay(100);
-
-                        const range = document.createRange();
-                        range.selectNodeContents(editor);
-                        const sel = window.getSelection();
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                        await delay(100);
-
-                        const htmlContent = ticket.desc.split('\n').map(line => `<p>${line || '<br>'}</p>`).join('');
-                        const dataTransfer = new DataTransfer();
-                        dataTransfer.setData('text/html', htmlContent);
-                        dataTransfer.setData('text/plain', ticket.desc);
-
-                        const pasteEvent = new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true });
-                        editor.dispatchEvent(pasteEvent);
-
-                        if (editor.textContent.trim() === '') {
-                            editor.innerHTML = htmlContent;
-                            editor.dispatchEvent(new Event('input', { bubbles: true }));
-                        }
-
-                        await delay(300);
-                        editor.blur();
-                        editor.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
-                        await delay(100);
-                    }
+                    await setTipTapText(activeModal.querySelector(CONFIG.SELECTORS.TIPTAP_EDITOR), ticket.desc);
                 }
 
                 // PHASE 3: STANDARD INPUTS
@@ -914,7 +973,6 @@
 
                 if (saveBtn && !saveBtn.disabled) {
                     syntheticClick(saveBtn, true);
-
                     for (let w = 0; w < CONFIG.POLLING.MAX_TRIES; w++) {
                         await delay(CONFIG.POLLING.INTERVAL);
                         if (!getActivePoshModal()) break;
@@ -932,19 +990,22 @@
             }
         }
 
+        if (!STATE.isRunning) return; // Check if aborted mid-flight
+
         showToast(`✅ All tickets ${STATE.isEditMode ? 'updated' : 'created'} successfully!`, 'success');
         playAudioAlert('success');
         removeToast(CONFIG.DELAYS.TOAST_LONG);
 
-        STATE.isRunning = false;
+        setRunningState(false);
         STATE.rows = [];
     }
 
-    const observer = new MutationObserver(() => {
-        if (window.location.pathname.match(/\/events\/[a-zA-Z0-9]+\/tickets/)) injectNativeUI();
-    });
-    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => observer.observe(document.body, { childList: true, subtree: true }));
-    }
-    else { observer.observe(document.body, { childList: true, subtree: true }); }
+    // ==========================================
+    // THE "STICKY" ASSERTER (Existence Loop)
+    // ==========================================
+    setInterval(() => {
+        if (!window.location.pathname.includes('/tickets')) return;
+        injectNativeUI();
+    }, CONFIG.POLLING.ASSERTER);
 
 })();
