@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         [Google Drive] Extract Folder Info
+// @name         [Google Drive] Folder Actions
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_32dp.png
-// @version      2.9
-// @description  Extracts the current folder ID and name to the clipboard, and provides quick workflow links.
+// @version      3.0
+// @description  Extracts folder metadata and provides quick access to related workflow spreadsheets.
 // @author       Xiv
 // @match        *://drive.google.com/*
 // @noframes
@@ -37,7 +37,8 @@
             fadeDuration: 300
         },
         urls: {
-            pnlGenerator: 'https://docs.google.com/spreadsheets/d/1FJWveIYeLX5F1tn0yxYa69AOkjYlPrfgYNkZiv88nYc'
+            pnlGenerator: 'https://docs.google.com/spreadsheets/d/1FJWveIYeLX5F1tn0yxYa69AOkjYlPrfgYNkZiv88nYc',
+            createFolders: 'https://docs.google.com/spreadsheets/d/1KcmFC-TOAM9UANtjMDXqJIQhP4B-YXpOn-Kjtz67550'
         },
         svg: {
             copyPath: 'M13.5 0.75H3c-0.825 0-1.5 0.675-1.5 1.5v10.5h1.5V2.25h10.5V0.75zM15.75 3.75H6c-0.825 0-1.5 0.675-1.5 1.5v10.5c0 0.825 0.675 1.5 1.5 1.5h9.75c0.825 0 1.5-0.675 1.5-1.5V5.25c0-0.825-0.675-1.5-1.5-1.5zM15.75 15.75H6V5.25h9.75v10.5z',
@@ -184,6 +185,7 @@
         try {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             if (!AudioContext) return;
+
             const ctx = new AudioContext();
             const osc = ctx.createOscillator();
             const gainNode = ctx.createGain();
@@ -207,7 +209,6 @@
 
     function showToast(message, isError = false) {
         let container = document.getElementById(CONFIG.ui.toastContainerId);
-
         if (!container) {
             container = document.createElement('div');
             container.id = CONFIG.ui.toastContainerId;
@@ -280,13 +281,17 @@
         textArea.style.top = "0";
         textArea.style.left = "0";
         textArea.style.opacity = "0";
+
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
 
         let success = false;
-        try { success = document.execCommand('copy'); }
-        catch (err) { console.error('[Google Drive Extractor] Fallback clipboard failed.'); }
+        try {
+            success = document.execCommand('copy');
+        } catch (err) {
+            console.error('[Google Drive Extractor] Fallback clipboard failed.');
+        }
 
         document.body.removeChild(textArea);
         return success;
@@ -310,7 +315,6 @@
         isProcessing = true;
 
         const data = extractFolderData();
-
         if (!data) {
             showToast('Navigation Error: Open a specific folder to extract data.', true);
             isProcessing = false;
@@ -337,23 +341,28 @@
         dropdown.id = CONFIG.ui.dropdownId;
         dropdown.className = CONFIG.ui.dropdownClass;
 
-        const pnlItem = document.createElement('button');
-        pnlItem.className = CONFIG.ui.dropdownItemClass;
+        function addDropdownItem(text, iconPath, url) {
+            const item = document.createElement('button');
+            item.className = CONFIG.ui.dropdownItemClass;
 
-        const sheetsIcon = createIcon(CONFIG.svg.sheetsPath, '24', '0 0 24 24', '#0f9d58');
-        const pnlText = document.createElement('div');
-        pnlText.textContent = 'Open P&L Generator';
+            const icon = createIcon(iconPath, '24', '0 0 24 24', '#0f9d58');
+            const label = document.createElement('div');
+            label.textContent = text;
 
-        pnlItem.appendChild(sheetsIcon);
-        pnlItem.appendChild(pnlText);
-        dropdown.appendChild(pnlItem);
+            item.appendChild(icon);
+            item.appendChild(label);
+            dropdown.appendChild(item);
 
-        pnlItem.addEventListener('mousedown', (e) => {
-            blockEvent(e);
-            window.open(CONFIG.urls.pnlGenerator, '_blank');
-            closeAllDropdowns();
-        }, { capture: true });
-        pnlItem.addEventListener('click', blockEvent, { capture: true });
+            item.addEventListener('mousedown', (e) => {
+                blockEvent(e);
+                window.open(url, '_blank');
+                closeAllDropdowns();
+            }, { capture: true });
+            item.addEventListener('click', blockEvent, { capture: true });
+        }
+
+        addDropdownItem('Open P&L Generator', CONFIG.svg.sheetsPath, CONFIG.urls.pnlGenerator);
+        addDropdownItem('Create Folders', CONFIG.svg.sheetsPath, CONFIG.urls.createFolders);
 
         document.body.appendChild(dropdown);
     }
