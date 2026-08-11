@@ -2,7 +2,7 @@
 // @name         [Posh] Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://posh.vip/favicon.ico
-// @version      6.0
+// @version      6.1
 // @description  Highlights active ticket sales, injects venue names, provides tab-isolated multi-filter controls, and summarizes sales with timeline badges.
 // @author       Xiv
 // @match        *://*.posh.vip/*
@@ -114,7 +114,10 @@
             "Club Lambda": ["1031 Grand St, Brooklyn, NY 11211"],
             "Diamond Club": ["101 Railroad Pl, Danbury, CT 06810"],
             "Dive Bar BK": ["408 Troutman St, Brooklyn, NY 11237"],
-            "Don Rique / NinetySix": ["2 Knickerbocker Ave, Brooklyn, NY 11237"],
+            "Don Rique": [
+                "2 Knickerbocker Ave, Brooklyn, NY 11237",
+                "2 Knickerbocker Ave, Brooklyn, NY 11237, EE. UU."
+            ],
             "Dream Hotel": ["355 W 16th St, New York, NY 10011"],
             "Elegance": ["2964 Main St, Hartford, CT 06120"],
             "Elsie Rooftop": ["1412 Broadway, New York, NY 10018"],
