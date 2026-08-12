@@ -2,7 +2,7 @@
 // @name         [Posh] Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://posh.vip/favicon.ico
-// @version      6.1
+// @version      6.2
 // @description  Highlights active ticket sales, injects venue names, provides tab-isolated multi-filter controls, and summarizes sales with timeline badges.
 // @author       Xiv
 // @match        *://*.posh.vip/*
@@ -61,6 +61,7 @@
             ACTIVE_STACK: 'is-active-stack',
             BADGE_CONTAINER: 'xiv-badge-container',
             VENUE_BADGE: 'xiv-venue-badge',
+            VENUE_BADGE_UNKNOWN: 'xiv-venue-badge-unknown',
             FAB_CLEAR: 'xiv-fab-clear'
         },
         ATTRS: {
@@ -428,6 +429,11 @@
                 white-space: nowrap; transition: opacity 0.2s ease, transform 0.2s ease;
                 display: inline-block;
             }
+            .${CONFIG.CLASSES.VENUE_BADGE_UNKNOWN} {
+                background-color: rgba(239, 68, 68, 0.15) !important;
+                color: ${CONFIG.COLORS.DANGER} !important;
+                border-color: rgba(239, 68, 68, 0.3) !important;
+            }
 
             /* --- HIGHLIGHTER ROW STYLES & FILTERING --- */
             .xiv-has-sales-bg { border-color: ${CONFIG.COLORS.HIGHLIGHT_BORDER} !important; background-color: ${CONFIG.COLORS.HIGHLIGHT_BG} !important; transition: background-color 0.4s ease, border-color 0.4s ease !important; }
@@ -790,7 +796,7 @@
                 cards.forEach(card => {
                     if (card.getAttribute(CONFIG.ATTRS.DATA_SALES) === "true") {
                         const venue = card.getAttribute(CONFIG.ATTRS.DATA_VENUE);
-                        if (venue && venue !== CONFIG.STRINGS.UNKNOWN_VENUE) {
+                        if (venue) {
                             venueCounts.set(venue, (venueCounts.get(venue) || 0) + 1);
                         }
                     }
@@ -820,6 +826,9 @@
                 sortedVenues.forEach(([venue, count]) => {
                     const badge = document.createElement('span');
                     badge.className = CONFIG.CLASSES.VENUE_BADGE;
+                    if (venue === CONFIG.STRINGS.UNKNOWN_VENUE) {
+                        badge.classList.add(CONFIG.CLASSES.VENUE_BADGE_UNKNOWN);
+                    }
                     badge.textContent = count > 1 ? `${venue} [${count}]` : venue;
                     badgeContainer.appendChild(badge);
                 });
@@ -853,7 +862,7 @@
                     if (msTo && timestamp > msTo) hideForDate = true;
                 }
 
-                if (!hideForSales && !hideForDate && venue && venue !== CONFIG.STRINGS.UNKNOWN_VENUE) {
+                if (!hideForSales && !hideForDate && venue) {
                     AppState.availableVenues.add(venue);
                 }
             });
