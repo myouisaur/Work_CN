@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
-// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRDA0MTBDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDJ2MjBtLTctN2w3IDcgNy03Ii8+PC9zdmc+
-// @version      7.7
-// @description  Extracts and displays ticket sales and revenue metrics directly within event dashboards.
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMTBiOTgxIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cGF0aCBkPSJNMTYgOGgtNmEyIDIgMCAxIDAgMCA0aDRhMiAyIDAgMSAxIDAgNEg4Ii8+PHBhdGggZD0iTTEyIDE4VjYiLz48L3N2Zz4=
+// @version      8.2
+// @description  Extracts and displays ticket sales and revenue metrics directly within supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
 // @match        *://*.posh.vip/*
@@ -11,8 +11,8 @@
 // @match        *://*.eventim.us/*
 // @match        *://*.boletosexpress.com/*
 // @match        *://*.tickeri.com/*
-// @noframes
 // @run-at       document-idle
+// @noframes
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_addStyle
@@ -25,26 +25,48 @@
     'use strict';
 
     if (window !== window.top) return;
-    if (window.__uese_initialized) return;
-    window.__uese_initialized = true;
+    if (window.xivInitialized) return;
+    window.xivInitialized = true;
 
     // ============================================================================
     // 1. CONFIGURATION & STATE
     // ============================================================================
 
     const CONFIG = {
+        VERSION: '7.12',
         DEBUG: false,
-        DEBOUNCE_MS: 300,
-        POLL_BASE_DELAY_MS: 1000,
-        POLL_MAX_ATTEMPTS: 15,
-        POLL_MULTIPLIER: 1.5,
-        UI_Z_INDEX: 2147483647,
+
+        TIMING: {
+            DEBOUNCE_MS: 300,
+            POLL_BASE_DELAY_MS: 1000,
+            POLL_MAX_ATTEMPTS: 15,
+            POLL_MULTIPLIER: 1.5,
+            TOAST_DURATION_MS: 3000
+        },
+
+        UI: {
+            Z_INDEX: 2147483647,
+        },
+
+        STORAGE_KEYS: {
+            POS_X: 'xiv_pos_x',
+            POS_Y: 'xiv_pos_y'
+        },
+
         DEFAULTS: {
             TICKETS: '0',
             REVENUE: '$0',
             TEXT_SOLD: 'Tickets Sold',
             TEXT_NET: 'Net Sales',
             TEXT_CHECK_FREE: 'check free tix'
+        },
+
+        ICONS: {
+            DRAG_HANDLE: "M9 5h2v2H9V5zm0 6h2v2H9v-2zm0 6h2v2H9v-2zm4-12h2v2h-2V5zm0 6h2v2h-2v-2zm0 6h2v2h-2v-2z",
+            COPY: "M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3",
+            REFRESH: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
+            SUCCESS: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+            ERROR: "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
         }
     };
 
@@ -61,7 +83,7 @@
     };
 
     // ============================================================================
-    // 2. UTILITIES & STORAGE
+    // 2. UTILITIES, STORAGE & AUDIO
     // ============================================================================
 
     const Logger = {
@@ -86,15 +108,65 @@
             } catch { /* Ignore gracefully */ }
         },
         getPosition() {
-            return { x: this.get('uese_pos_x', null), y: this.get('uese_pos_y', null) };
+            const x = parseInt(this.get(CONFIG.STORAGE_KEYS.POS_X, null), 10);
+            const y = parseInt(this.get(CONFIG.STORAGE_KEYS.POS_Y, null), 10);
+            return {
+                x: isNaN(x) ? null : x,
+                y: isNaN(y) ? null : y
+            };
         },
         setPosition(x, y) {
-            this.set('uese_pos_x', x);
-            this.set('uese_pos_y', y);
+            this.set(CONFIG.STORAGE_KEYS.POS_X, x);
+            this.set(CONFIG.STORAGE_KEYS.POS_Y, y);
         },
         resetPosition() {
-            this.set('uese_pos_x', null);
-            this.set('uese_pos_y', null);
+            this.set(CONFIG.STORAGE_KEYS.POS_X, null);
+            this.set(CONFIG.STORAGE_KEYS.POS_Y, null);
+        }
+    };
+
+    const AudioNotifier = {
+        ctx: null,
+        init() {
+            if (!this.ctx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (AudioContext) this.ctx = new AudioContext();
+            }
+        },
+        play(type) {
+            try {
+                this.init();
+                if (!this.ctx) return;
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                const now = this.ctx.currentTime;
+                if (type === 'success') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, now); // A5
+                    osc.frequency.setValueAtTime(1108.73, now + 0.1); // C#6
+                    gain.gain.setValueAtTime(0, now);
+                    gain.gain.linearRampToValueAtTime(0.1, now + 0.02);
+                    gain.gain.linearRampToValueAtTime(0, now + 0.2);
+                    osc.start(now);
+                    osc.stop(now + 0.2);
+                } else {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(220, now); // A3
+                    osc.frequency.setValueAtTime(200, now + 0.1);
+                    gain.gain.setValueAtTime(0, now);
+                    gain.gain.linearRampToValueAtTime(0.1, now + 0.02);
+                    gain.gain.linearRampToValueAtTime(0, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                }
+            } catch (e) {
+                Logger.warn("AudioNotifier", "Failed to play audio feedback.", e);
+            }
         }
     };
 
@@ -143,14 +215,14 @@
             if (text) element.textContent = text;
             return element;
         },
-        getTextNode: (text, exact = false) => {
+        getTextNode: (text, exact = false, root = document) => {
             const condition = exact
                 ? `normalize-space(text())='${text}'`
                 : `contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${text.toLowerCase()}')`;
-            return document.evaluate(`//*[not(self::script or self::style or self::noscript) and ${condition}]`, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+            return document.evaluate(`.//*[not(self::script or self::style or self::noscript) and ${condition}]`, root, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
         },
-        findCardByText: (text, exact = false) => {
-            const node = Utils.getTextNode(text, exact);
+        findCardByText: (text, exact = false, root = document) => {
+            const node = Utils.getTextNode(text, exact, root);
             if (!node) return null;
             let parent = node.parentElement;
             for (let i = 0; i < 5; i++) {
@@ -165,17 +237,17 @@
     // 3. SITE MODULES (Extraction Logic & Theme)
     // ============================================================================
 
-    const siteModules = [
+    CONFIG.SITES = [
         {
             name: 'Eventbrite',
             domain: 'eventbrite.com',
             rootSelector: '#root, main',
             theme: { accent: '#D0410C', accentSec: '#D0410C' },
-            check: () => !!Utils.getTextNode(CONFIG.DEFAULTS.TEXT_SOLD, true),
-            extract: () => {
+            check: (root) => !!Utils.getTextNode(CONFIG.DEFAULTS.TEXT_SOLD, true, root),
+            extract: (root) => {
                 let ticketsSold = '', netSales = '', freeTickets = undefined;
 
-                const tixCard = Utils.findCardByText(CONFIG.DEFAULTS.TEXT_SOLD, true);
+                const tixCard = Utils.findCardByText(CONFIG.DEFAULTS.TEXT_SOLD, true, root);
                 if (tixCard) {
                     const rawText = tixCard.textContent || '';
                     const tixMatch = rawText.match(/(\d+)\s*\/\s*\d+/);
@@ -184,7 +256,7 @@
                     if (freeMatch) freeTickets = freeMatch[1];
                 }
 
-                const salesCard = Utils.findCardByText(CONFIG.DEFAULTS.TEXT_NET, true);
+                const salesCard = Utils.findCardByText(CONFIG.DEFAULTS.TEXT_NET, true, root);
                 if (salesCard) {
                     const moneyMatch = (salesCard.textContent || '').match(/[$£€]\s*[\d,.]+/);
                     if (moneyMatch) netSales = moneyMatch[0];
@@ -199,17 +271,55 @@
         {
             name: 'Posh',
             domain: 'posh.vip',
-            rootSelector: '#__next, #root',
+            rootSelector: '#__next, #root, body',
             theme: { accent: '#FFFFFF', accentSec: '#FFFFFF' },
-            check: () => !!document.querySelector('div.CrossSection__w3a2U'),
-            extract: () => {
+            check: (root) => {
+                const path = window.location.pathname;
+                const isEventDashboard = /\/events\/[a-fA-F0-9]+\//i.test(path);
+                const isPublicEvent = path.startsWith('/e/');
+
+                if (!isEventDashboard && !isPublicEvent) return false;
+
+                return !!root.querySelector('div.CrossSection__w3a2U') || !!root.querySelector('[data-slot="stat-card"]');
+            },
+            extract: (root) => {
                 let ticketsSold = '', totalRevenue = CONFIG.DEFAULTS.REVENUE;
-                document.querySelectorAll('div.CrossSection__w3a2U').forEach(div => {
-                    const label = div.querySelector('p')?.textContent?.trim();
-                    if (label === "Total Tickets Sold" || label === "Total RSVPs") ticketsSold = div.querySelector('h3')?.textContent?.trim();
-                    if (label === "Total Revenue" || label === "Revenue") totalRevenue = div.querySelector('h3')?.textContent?.trim();
-                });
-                if (!ticketsSold && totalRevenue === CONFIG.DEFAULTS.REVENUE) throw new Error("Data missing.");
+
+                const statCards = root.querySelectorAll('[data-slot="stat-card"]');
+                if (statCards.length > 0) {
+                    statCards.forEach(card => {
+                        const labelEl = card.querySelector('span.text-muted-foreground');
+                        if (!labelEl) return;
+
+                        const labelText = labelEl.textContent.trim().toLowerCase();
+                        const valueContainer = card.querySelector('span.text-xl > span');
+
+                        if (!valueContainer) return;
+
+                        if (labelText.includes('net tickets sold') || labelText.includes('gross tickets sold')) {
+                            ticketsSold = valueContainer.textContent.trim();
+                        } else if (labelText.includes('net revenue') || labelText.includes('gross revenue')) {
+                            totalRevenue = valueContainer.textContent.trim();
+                        }
+                    });
+                }
+
+                if (!ticketsSold && totalRevenue === CONFIG.DEFAULTS.REVENUE) {
+                    root.querySelectorAll('div.CrossSection__w3a2U').forEach(div => {
+                        const label = div.querySelector('p')?.textContent?.trim();
+                        if (label === "Total Tickets Sold" || label === "Total RSVPs") {
+                            ticketsSold = div.querySelector('h3')?.textContent?.trim();
+                        }
+                        if (label === "Total Revenue" || label === "Revenue") {
+                            totalRevenue = div.querySelector('h3')?.textContent?.trim();
+                        }
+                    });
+                }
+
+                if (!ticketsSold && totalRevenue === CONFIG.DEFAULTS.REVENUE) {
+                    throw new Error("Data missing.");
+                }
+
                 return { tickets: ticketsSold, revenue: totalRevenue };
             }
         },
@@ -218,12 +328,11 @@
             domain: 'ra.co',
             rootSelector: '#__next',
             theme: { accent: '#FF4848', accentSec: '#FF4848' },
-            // Added strict URL path requirement to prevent widget ghosting on the /pro dashboard
-            check: () => window.location.pathname.includes('/tickets/management') && !!document.querySelector('span[color="primary"]'),
-            extract: () => {
+            check: (root) => window.location.pathname.includes('/tickets/management') && !!root.querySelector('span[color="primary"]'),
+            extract: (root) => {
                 let tickets = CONFIG.DEFAULTS.TICKETS, revenue = CONFIG.DEFAULTS.REVENUE;
 
-                document.querySelectorAll('span[color="primary"]').forEach(span => {
+                root.querySelectorAll('span[color="primary"]').forEach(span => {
                     const text = span.textContent.trim();
                     const sibling = span.nextElementSibling;
                     if (sibling && sibling.textContent.includes('/')) {
@@ -243,9 +352,9 @@
             domain: 'eventim.us',
             rootSelector: 'body',
             theme: { accent: '#0C9A9A', accentSec: '#0C9A9A' },
-            check: () => !!document.querySelector('#table table'),
-            extract: () => {
-                const dataRow = document.querySelectorAll('#table table tr')[1];
+            check: (root) => !!root.querySelector('#table table'),
+            extract: (root) => {
+                const dataRow = root.querySelectorAll('#table table tr')[1];
                 if (!dataRow) throw new Error("Data row missing.");
                 const cells = dataRow.querySelectorAll('td');
                 return {
@@ -259,15 +368,15 @@
             domain: 'boletosexpress.com',
             rootSelector: 'body',
             theme: { accent: '#1C2A7C', accentSec: '#1C2A7C' },
-            check: () => !!document.querySelector('#audit'),
-            extract: () => {
+            check: (root) => !!root.querySelector('#audit'),
+            extract: (root) => {
                 let tickets = CONFIG.DEFAULTS.TICKETS;
-                document.querySelectorAll('#audit dl').forEach(dl => {
+                root.querySelectorAll('#audit dl').forEach(dl => {
                     if (dl.querySelector('dt')?.textContent?.includes('Tickets Distributed')) {
                         tickets = dl.querySelector('dd b')?.textContent?.trim() || CONFIG.DEFAULTS.TICKETS;
                     }
                 });
-                const revElem = document.querySelector('#revenue_total b');
+                const revElem = root.querySelector('#revenue_total b');
                 return { tickets, revenue: revElem ? revElem.textContent.trim() : CONFIG.DEFAULTS.REVENUE };
             }
         },
@@ -276,11 +385,11 @@
             domain: 'tickeri.com',
             rootSelector: 'body',
             theme: { accent: '#EB0045', accentSec: '#EB0045' },
-            check: () => window.location.pathname.includes('/event/') && document.body.textContent.includes('Ticket Inventory'),
-            extract: () => {
+            check: (root) => window.location.pathname.includes('/event/') && document.body.textContent.includes('Ticket Inventory'),
+            extract: (root) => {
                 let tickets = CONFIG.DEFAULTS.TICKETS, revenue = CONFIG.DEFAULTS.REVENUE;
 
-                const elements = Array.from(document.querySelectorAll('span, div, p')).filter(el => el.children.length === 0);
+                const elements = Array.from(root.querySelectorAll('span, div, p')).filter(el => el.children.length === 0);
 
                 const tLabel = elements.find(s => s.textContent.includes('Ticket Inventory'));
                 if (tLabel) {
@@ -308,7 +417,7 @@
     ];
 
     // ============================================================================
-    // 4. UI & PRESENTATION (Liquid Glass Component)
+    // 4. UI & PRESENTATION (Liquid Glass Component V5)
     // ============================================================================
 
     const UI = {
@@ -332,191 +441,208 @@
                     --status-rgb-green: 16, 185, 129;
                     --status-rgb-yellow: 245, 158, 11;
                     --status-rgb-red: 239, 68, 68;
-                    --uese-current-status-rgb: var(--status-rgb-scan);
+                    --xiv-current-status-rgb: var(--status-rgb-scan);
                 }
 
-                .uese-widget.status-scanning { --uese-current-status-rgb: var(--status-rgb-scan); }
-                .uese-widget.status-green    { --uese-current-status-rgb: var(--status-rgb-green); }
-                .uese-widget.status-yellow   { --uese-current-status-rgb: var(--status-rgb-yellow); }
-                .uese-widget.status-red      { --uese-current-status-rgb: var(--status-rgb-red); }
+                .xiv-dragging-global * {
+                    user-select: none !important;
+                }
 
-                .uese-widget {
+                .xiv-glass-scope.status-scanning { --xiv-current-status-rgb: var(--status-rgb-scan); }
+                .xiv-glass-scope.status-green    { --xiv-current-status-rgb: var(--status-rgb-green); }
+                .xiv-glass-scope.status-yellow   { --xiv-current-status-rgb: var(--status-rgb-yellow); }
+                .xiv-glass-scope.status-red      { --xiv-current-status-rgb: var(--status-rgb-red); }
+
+                /* ── Scope (Positioning Wrapper) ────────────────────────────────────── */
+                .xiv-glass-scope {
                     position: fixed;
                     top: clamp(10px, 2vh, 40px);
                     left: 50%;
-                    z-index: ${CONFIG.UI_Z_INDEX};
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                    padding: 0.4rem 0.75rem;
-                    border-radius: 9999px;
+                    transform: translateX(-50%);
+                    z-index: ${CONFIG.UI.Z_INDEX};
+
+                    /* CRITICAL: No opacity transitions here! Visibility swaps instantly. */
+                    visibility: hidden;
+                    transition: visibility 0s linear 0.3s;
+                }
+
+                .xiv-glass-scope.is-visible {
+                    visibility: visible;
+                    transition: visibility 0s;
+                }
+
+                .xiv-glass-scope.xiv-dragged {
+                    transform: none !important;
+                }
+
+                /* ── Shell (Base Glass Surface) ─────────────────────────────────────── */
+                .xiv-glass-shell {
+                    position: relative;
+                    overflow: hidden;
                     border: none;
                     outline: none;
-                    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    cursor: default;
+                    border-radius: 9999px;
+                    font-size: 14px !important; /* Establishes strictly controlled relative em sizing */
 
-                    background: rgba(15, 23, 42, 0.45);
-                    backdrop-filter: blur(28px) saturate(200%) brightness(1.08);
-                    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.08);
+                    background: rgba(255, 255, 255, 0.14); /* Liquid Glass V5 Standard */
+                    backdrop-filter: blur(0.5em) saturate(180%) brightness(1.1);
+                    -webkit-backdrop-filter: blur(0.5em) saturate(180%) brightness(1.1);
 
                     box-shadow:
-                        inset 0  1.5px 0   rgba(255,255,255,0.75),
-                        inset 0 -1.5px 0   rgba(255,255,255,0.06),
-                        inset  1px 0   0   rgba(255,255,255,0.30),
-                        inset -1px 0   0   rgba(255,255,255,0.10),
-                        0 0 0 0.5px        rgba(255,255,255,0.18),
-                        0 8px 32px         rgba(var(--uese-current-status-rgb), 0.35),
-                        0 2px  8px         rgba(0,0,0,0.30);
+                        inset 0     0.09em 0    rgba(255,255,255,0.75),
+                        inset 0    -0.09em 0    rgba(255,255,255,0.06),
+                        inset  0.06em 0    0    rgba(255,255,255,0.30),
+                        inset -0.06em 0    0    rgba(255,255,255,0.10),
+                        0 0 0       0.03em      rgba(255,255,255,0.20),
+                        0 0.4em     1.25em      rgba(var(--xiv-current-status-rgb), 0.35),
+                        0 0.15em    0.4em       rgba(0,0,0,0.20);
 
+                    /* CRITICAL: Hardware acceleration and independent opacity state */
                     opacity: 0;
-                    pointer-events: none;
-                    transform: translateX(-50%) translateY(-10px);
-                    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s ease, box-shadow 0.4s ease;
+                    will-change: transform, opacity;
+                    transform: translateZ(0) scale(0.9) translateY(4px);
+
+                    transition:
+                        transform  0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        opacity    0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        box-shadow 0.35s ease,
+                        background 0.35s ease;
                 }
 
-                .uese-widget.uese-visible {
+                .xiv-glass-scope.is-visible .xiv-glass-shell {
                     opacity: 1;
-                    pointer-events: auto;
-                    transform: translateX(-50%) translateY(0);
+                    transform: translateZ(0) scale(1) translateY(0);
                 }
 
-                .uese-widget.uese-dragged {
-                    transform: none;
-                }
-
-                .uese-widget::before {
+                /* ── Gradient Border Ring ─────────────────────── */
+                .xiv-glass-shell::before {
                     content: '';
                     position: absolute;
                     inset: 0;
-                    border-radius: 9999px;
-                    padding: 1px;
-                    background: linear-gradient(
-                        155deg,
+                    border-radius: inherit;
+                    padding: 0.06em;
+                    background: linear-gradient(155deg,
                         rgba(255,255,255,0.72) 0%,
                         rgba(255,255,255,0.35) 25%,
                         rgba(255,255,255,0.08) 55%,
-                        rgba(255,255,255,0.22) 100%
-                    );
+                        rgba(255,255,255,0.22) 100%);
                     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-                    mask:         linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+                    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
                     -webkit-mask-composite: xor;
                     mask-composite: exclude;
                     pointer-events: none;
                     z-index: 5;
                 }
 
-                .uese-widget::after {
+                /* ── Top Glare ─────────────────────────────────── */
+                .xiv-glass-shell::after {
                     content: '';
                     position: absolute;
                     top: 0; left: 0; right: 0;
                     height: 58%;
-                    background: radial-gradient(
-                        ellipse 75% 70% at 50% -8%,
-                        rgba(255,255,255,0.40)  0%,
-                        rgba(255,255,255,0.15) 40%,
-                        rgba(255,255,255,0.04) 70%,
-                        transparent            90%
-                    );
-                    border-radius: 9999px 9999px 0 0;
+                    background: radial-gradient(ellipse 75% 70% at 50% -8%,
+                        rgba(255,255,255,0.58) 0%,
+                        rgba(255,255,255,0.20) 40%,
+                        rgba(255,255,255,0.05) 70%,
+                        transparent 90%);
+                    border-radius: inherit;
                     pointer-events: none;
                     z-index: 5;
                 }
 
-                .uese-glass-scatter {
-                    position: absolute;
-                    inset: 2px;
-                    border-radius: 9999px;
-                    background: radial-gradient(ellipse 60% 50% at 38% 40%, rgba(255,255,255,0.08) 0%, transparent 65%);
-                    pointer-events: none;
-                    z-index: 1;
+                /* ── Inner Depth Layers ───────────────────────────────────────── */
+                .xiv-glass-lens {
+                    position: absolute; inset: 0; border-radius: inherit;
+                    background: radial-gradient(ellipse at 72% 56%, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 45%, rgba(180,200,255,0.04) 80%, rgba(0,0,0,0) 100%);
+                    pointer-events: none; z-index: 1;
                 }
 
-                .uese-glass-chroma {
-                    position: absolute;
-                    inset: 0;
-                    border-radius: 9999px;
-                    background: radial-gradient(ellipse 100% 100% at 50% 50%, transparent 62%, rgba(80,200,255,0.12) 74%, rgba(255,80,100,0.09) 84%, transparent 92%);
-                    pointer-events: none;
-                    z-index: 2;
+                .xiv-glass-scatter {
+                    position: absolute; inset: 0.12em; border-radius: inherit;
+                    background: radial-gradient(ellipse 60% 50% at 38% 40%, rgba(255,255,255,0.09) 0%, transparent 65%);
+                    pointer-events: none; z-index: 2;
                 }
 
-                .uese-glass-rim {
-                    position: absolute;
-                    bottom: 0; left: 12%; right: 12%;
-                    height: 40%;
+                .xiv-glass-chroma {
+                    position: absolute; inset: 0; border-radius: inherit;
+                    background: radial-gradient(ellipse 100% 100% at 50% 50%, transparent 62%, rgba(80,200,255,0.09) 74%, rgba(255,80,100,0.07) 84%, transparent 92%);
+                    pointer-events: none; z-index: 3;
+                }
+
+                .xiv-glass-rim {
+                    position: absolute; bottom: 0; left: 10%; right: 10%; height: 40%;
+                    border-radius: 0 0 inherit inherit;
                     background: radial-gradient(ellipse 80% 100% at 50% 115%, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.08) 45%, transparent 70%);
-                    border-radius: 0 0 9999px 9999px;
-                    pointer-events: none;
-                    z-index: 3;
+                    pointer-events: none; z-index: 4;
                 }
 
-                .uese-drag-handle, .uese-data-display, .uese-divider, .uese-btn {
+                /* ── Content Layer ───────────────────────────────────────────────────── */
+                .xiv-glass-content {
                     position: relative;
                     z-index: 6;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.5em;
+                    padding: 0.4em 0.75em;
+                    color: rgba(255, 255, 255, 0.96);
+                    filter: drop-shadow(0 0 0.25em rgba(0,0,0,0.65)) drop-shadow(0 0.06em 0.19em rgba(0,0,0,0.50));
+                    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                 }
 
-                .uese-drag-handle {
+                /* Inner interactive elements */
+                .xiv-drag-handle {
                     cursor: grab;
-                    padding: 0.4rem 0.2rem;
+                    padding: 0.4em 0.2em;
                     display: flex;
                     align-items: center;
                     opacity: 0.65;
-                    color: white;
                     transition: opacity 0.2s;
                 }
-                .uese-drag-handle:hover { opacity: 1; }
-                .uese-drag-handle:active { cursor: grabbing; }
+                .xiv-drag-handle:hover { opacity: 1; }
+                .xiv-drag-handle:active { cursor: grabbing; }
 
-                .uese-data-display {
+                .xiv-data-display {
                     display: flex;
                     align-items: center;
-                    gap: 0.55rem;
-                    padding: 0.25rem 0.55rem;
+                    gap: 0.55em;
+                    padding: 0.25em 0.55em;
                     border-radius: 9999px;
-                    font-size: clamp(12px, 1.25vw, 13.5px);
+                    font-size: 0.95em;
                     font-weight: 600;
                     letter-spacing: -0.02em;
                     cursor: pointer;
                     user-select: none;
                     transition: background 0.2s ease;
                 }
-                .uese-data-display:hover { background: rgba(255, 255, 255, 0.1); }
+                .xiv-data-display:hover { background: rgba(255, 255, 255, 0.1); }
 
-                .uese-indicator {
-                    width: 7px;
-                    height: 7px;
+                .xiv-indicator {
+                    width: 0.5em;
+                    height: 0.5em;
                     border-radius: 50%;
-                    background-color: rgb(var(--uese-current-status-rgb));
-                    box-shadow: 0 0 8px 1px rgb(var(--uese-current-status-rgb));
+                    background-color: rgb(var(--xiv-current-status-rgb));
+                    box-shadow: 0 0 0.6em 0.1em rgb(var(--xiv-current-status-rgb));
                     transition: all 0.4s ease;
                     flex-shrink: 0;
                 }
-                .uese-indicator.scanning { animation: uese-pulse-status 1.6s infinite; }
+                .xiv-indicator.scanning { animation: xiv-pulse-status 1.6s infinite; }
 
-                @keyframes uese-pulse-status {
-                    0%, 100% { opacity: 0.5; transform: scale(1); }
-                    50% { opacity: 1; transform: scale(1.15); }
-                }
-
-                .uese-data-text {
+                .xiv-data-text {
                     white-space: nowrap;
-                    color: rgba(255, 255, 255, 0.98);
-                    text-shadow: 0 1px 3px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
                 }
 
-                .uese-divider {
+                .xiv-divider {
                     width: 1px;
-                    height: 14px;
+                    height: 1em;
                     background: rgba(255, 255, 255, 0.25);
-                    box-shadow: 1px 0 0 rgba(0,0,0,0.15);
-                    margin: 0 0.1rem;
+                    margin: 0 0.1em;
                 }
 
-                .uese-btn {
+                .xiv-btn {
                     background: transparent;
                     color: rgba(255,255,255,0.75);
                     border: none;
-                    padding: 0.4rem;
+                    padding: 0.4em;
                     border-radius: 9999px;
                     cursor: pointer;
                     display: flex;
@@ -524,84 +650,116 @@
                     justify-content: center;
                     transition: all 0.2s ease;
                 }
-                .uese-btn:hover {
-                    background: rgba(255, 255, 255, 0.15);
-                    color: #ffffff;
-                }
-                .uese-btn:active { transform: scale(0.92); }
+                .xiv-btn:hover { background: rgba(255, 255, 255, 0.15); color: #ffffff; }
+                .xiv-btn:active { transform: scale(0.92); }
 
-                @keyframes uese-spin { 100% { transform: rotate(360deg); } }
-                .uese-spin svg { animation: uese-spin 1s linear infinite; }
+                @keyframes xiv-spin { 100% { transform: rotate(360deg); } }
+                .xiv-spin svg { animation: xiv-spin 1s linear infinite; }
 
-                .uese-toast {
-                    position: fixed;
-                    bottom: clamp(10px, 4vh, 24px);
-                    left: 50%;
-                    transform: translateX(-50%) translateY(20px);
-                    padding: 0.6rem 1.2rem;
-                    border-radius: 9999px;
-                    font-family: sans-serif;
-                    font-size: clamp(12px, 1.4vw, 13px);
-                    font-weight: 500;
-                    z-index: ${CONFIG.UI_Z_INDEX + 1};
-                    opacity: 0;
-                    pointer-events: none;
-                    transition: all 0.3s ease;
-                    display: flex;
-                    align-items: center;
-                    gap: 0.6rem;
-                    background: rgba(15, 23, 42, 0.92);
-                    backdrop-filter: blur(12px);
-                    -webkit-backdrop-filter: blur(12px);
-                    color: #fff;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-                    border: 1px solid rgba(255, 255, 255, 0.08);
+                /* Strict isolated Toast styling - Protected against host CSS bleed */
+                .xiv-toast {
+                    all: initial !important;
+                    position: fixed !important;
+                    bottom: clamp(10px, 4vh, 24px) !important;
+                    left: 50% !important;
+                    transform: translateX(-50%) translateY(20px) !important;
+                    padding: 0.6rem 1.2rem !important;
+                    border-radius: 9999px !important;
+                    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+                    font-size: 13px !important;
+                    line-height: 1.5 !important;
+                    font-weight: 500 !important;
+                    z-index: ${CONFIG.UI.Z_INDEX + 1} !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    gap: 10px !important;
+                    background: rgba(15, 23, 42, 0.92) !important;
+                    backdrop-filter: blur(12px) !important;
+                    -webkit-backdrop-filter: blur(12px) !important;
+                    color: #fff !important;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+                    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+                    box-sizing: border-box !important;
+                    min-height: 0 !important;
+                    min-width: 0 !important;
+                    width: auto !important;
+                    height: auto !important;
+                    white-space: nowrap !important;
                 }
-                .uese-toast.uese-show {
-                    opacity: 1;
-                    transform: translateX(-50%) translateY(0);
+                .xiv-toast.xiv-show {
+                    opacity: 1 !important;
+                    transform: translateX(-50%) translateY(0) !important;
+                }
+                .xiv-toast span {
+                    all: unset !important;
+                    font-family: inherit !important;
+                    font-size: inherit !important;
+                    font-weight: inherit !important;
+                    color: inherit !important;
+                    line-height: inherit !important;
+                }
+                .xiv-toast svg {
+                    width: 16px !important;
+                    height: 16px !important;
+                    min-width: 16px !important;
+                    min-height: 16px !important;
+                    margin: 0 !important;
                 }
             `);
         },
 
         buildWidget() {
-            this.els.wrapper = Utils.el('div', 'uese-widget status-scanning');
+            this.els.scope = Utils.el('div', 'xiv-glass-scope status-scanning');
+            this.els.shell = Utils.el('div', 'xiv-glass-shell');
 
-            this.els.glassScatter = Utils.el('div', 'uese-glass-scatter');
-            this.els.glassChroma = Utils.el('div', 'uese-glass-chroma');
-            this.els.glassRim = Utils.el('div', 'uese-glass-rim');
+            this.els.lens = Utils.el('div', 'xiv-glass-lens');
+            this.els.scatter = Utils.el('div', 'xiv-glass-scatter');
+            this.els.chroma = Utils.el('div', 'xiv-glass-chroma');
+            this.els.rim = Utils.el('div', 'xiv-glass-rim');
+            this.els.content = Utils.el('div', 'xiv-glass-content');
 
-            this.els.dragHandle = Utils.el('div', 'uese-drag-handle');
+            this.els.dragHandle = Utils.el('div', 'xiv-drag-handle');
             this.els.dragHandle.title = 'Drag to move (Double-Click to Reset)';
             this.els.dragHandle.setAttribute('tabindex', '0');
-            this.els.dragHandle.appendChild(Utils.createSvgIcon("M9 5h2v2H9V5zm0 6h2v2H9v-2zm0 6h2v2H9v-2zm4-12h2v2h-2V5zm0 6h2v2h-2v-2zm0 6h2v2h-2v-2z"));
+            this.els.dragHandle.appendChild(Utils.createSvgIcon(CONFIG.ICONS.DRAG_HANDLE));
 
-            this.els.dataDisplay = Utils.el('div', 'uese-data-display');
-            this.els.indicator = Utils.el('div', 'uese-indicator scanning');
-            this.els.dataText = Utils.el('span', 'uese-data-text', 'SCANNING...');
+            this.els.dataDisplay = Utils.el('div', 'xiv-data-display');
+            this.els.indicator = Utils.el('div', 'xiv-indicator scanning');
+            this.els.dataText = Utils.el('span', 'xiv-data-text', 'SCANNING...');
             this.els.dataDisplay.append(this.els.indicator, this.els.dataText);
 
-            this.els.divider = Utils.el('div', 'uese-divider');
+            this.els.divider = Utils.el('div', 'xiv-divider');
 
-            this.els.copyBtn = Utils.el('button', 'uese-btn');
+            this.els.copyBtn = Utils.el('button', 'xiv-btn');
             this.els.copyBtn.title = 'Copy Extracted Data';
-            this.els.copyBtn.appendChild(Utils.createSvgIcon("M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"));
+            this.els.copyBtn.appendChild(Utils.createSvgIcon(CONFIG.ICONS.COPY));
 
-            this.els.refreshBtn = Utils.el('button', 'uese-btn');
+            this.els.refreshBtn = Utils.el('button', 'xiv-btn');
             this.els.refreshBtn.title = 'Force Re-scan';
-            this.els.refreshBtn.appendChild(Utils.createSvgIcon("M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"));
+            this.els.refreshBtn.appendChild(Utils.createSvgIcon(CONFIG.ICONS.REFRESH));
 
-            this.els.wrapper.append(
-                this.els.glassScatter,
-                this.els.glassChroma,
-                this.els.glassRim,
+            this.els.content.append(
                 this.els.dragHandle,
                 this.els.dataDisplay,
                 this.els.divider,
                 this.els.copyBtn,
                 this.els.refreshBtn
             );
-            document.body.appendChild(this.els.wrapper);
+
+            this.els.shell.append(
+                this.els.lens,
+                this.els.scatter,
+                this.els.chroma,
+                this.els.rim,
+                this.els.content
+            );
+
+            this.els.scope.append(this.els.shell);
+            document.body.appendChild(this.els.scope);
+
             this.loadSafePosition();
 
             const handleCopy = (e) => {
@@ -619,51 +777,51 @@
             });
             this.els.dragHandle.addEventListener('dblclick', () => this.resetPosition());
 
-            this.initDraggable(this.els.wrapper, this.els.dragHandle);
+            this.initDraggable(this.els.scope, this.els.dragHandle);
         },
 
         buildToast() {
-            this.els.toast = Utils.el('div', 'uese-toast');
-            this.els.toastIcon = Utils.createSvgIcon("M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", "currentColor");
+            this.els.toast = Utils.el('div', 'xiv-toast');
+            this.els.toastIcon = Utils.createSvgIcon(CONFIG.ICONS.SUCCESS, "currentColor");
             this.els.toastText = Utils.el('span');
             this.els.toast.append(this.els.toastIcon, this.els.toastText);
             document.body.appendChild(this.els.toast);
         },
 
         ensureInDOM() {
-            if (!this.els.wrapper) return;
-            if (!document.body.contains(this.els.wrapper)) document.body.appendChild(this.els.wrapper);
+            if (!this.els.scope) return;
+            if (!document.body.contains(this.els.scope)) document.body.appendChild(this.els.scope);
             if (!document.body.contains(this.els.toast)) document.body.appendChild(this.els.toast);
         },
 
         applyTheme(themeObj) {
             if (!themeObj) return;
             const root = document.documentElement;
-            root.style.setProperty('--uese-accent', themeObj.accent);
-            root.style.setProperty('--uese-accent-rgb', Utils.hexToRgb(themeObj.accent));
+            root.style.setProperty('--xiv-accent', themeObj.accent);
+            root.style.setProperty('--xiv-accent-rgb', Utils.hexToRgb(themeObj.accent));
         },
 
         loadSafePosition() {
             const pos = Storage.getPosition();
             if (pos.x !== null && pos.y !== null) {
                 requestAnimationFrame(() => {
-                    const width = this.els.wrapper.offsetWidth || 300;
-                    const height = this.els.wrapper.offsetHeight || 50;
+                    const width = this.els.scope.offsetWidth || 300;
+                    const height = this.els.scope.offsetHeight || 50;
 
                     const safeX = Math.max(0, Math.min(pos.x, window.innerWidth - width));
                     const safeY = Math.max(0, Math.min(pos.y, window.innerHeight - height));
 
-                    this.els.wrapper.style.left = `${safeX}px`;
-                    this.els.wrapper.style.top = `${safeY}px`;
-                    this.els.wrapper.classList.add('uese-dragged');
+                    this.els.scope.style.left = `${safeX}px`;
+                    this.els.scope.style.top = `${safeY}px`;
+                    this.els.scope.classList.add('xiv-dragged');
                 });
             }
         },
 
         resetPosition() {
-            this.els.wrapper.classList.remove('uese-dragged');
-            this.els.wrapper.style.left = '50%';
-            this.els.wrapper.style.top = 'clamp(10px, 2vh, 40px)';
+            this.els.scope.classList.remove('xiv-dragged');
+            this.els.scope.style.left = '50%';
+            this.els.scope.style.top = 'clamp(10px, 2vh, 40px)';
             Storage.resetPosition();
             this.showToast("Position Reset", "success");
         },
@@ -694,22 +852,22 @@
             const onMouseUp = () => {
                 if (!this.isDragging) return;
                 this.isDragging = false;
+                document.body.classList.remove('xiv-dragging-global');
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
                 document.removeEventListener('touchmove', onMouseMove);
                 document.removeEventListener('touchend', onMouseUp);
-                el.style.transition = 'transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.3s ease, box-shadow 0.4s ease';
                 Storage.setPosition(parseInt(el.style.left, 10), parseInt(el.style.top, 10));
             };
             const onMouseDown = (e) => {
                 this.isDragging = true;
-                el.style.transition = 'box-shadow 0.4s ease';
+                document.body.classList.add('xiv-dragging-global');
 
-                if (!el.classList.contains('uese-dragged')) {
+                if (!el.classList.contains('xiv-dragged')) {
                     const rect = el.getBoundingClientRect();
                     el.style.left = `${rect.left}px`;
                     el.style.top = `${rect.top}px`;
-                    el.classList.add('uese-dragged');
+                    el.classList.add('xiv-dragged');
                 }
 
                 const clientX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
@@ -742,41 +900,41 @@
         updateVisibility(visible) {
             this.ensureInDOM();
             if (visible) {
-                this.els.wrapper.classList.add('uese-visible');
+                this.els.scope.classList.add('is-visible');
                 if (State.themeConfig) this.applyTheme(State.themeConfig);
             } else {
-                this.els.wrapper.classList.remove('uese-visible');
+                this.els.scope.classList.remove('is-visible');
             }
         },
 
         updateStatus(state, tickets = '', revenue = '') {
             this.ensureInDOM();
-            this.els.wrapper.classList.remove('status-scanning', 'status-green', 'status-yellow', 'status-red');
-            this.els.indicator.className = 'uese-indicator';
+            this.els.scope.classList.remove('status-scanning', 'status-green', 'status-yellow', 'status-red');
+            this.els.indicator.className = 'xiv-indicator';
 
             if (state === 'scanning') {
-                this.els.refreshBtn.classList.add('uese-spin');
+                this.els.refreshBtn.classList.add('xiv-spin');
                 this.els.dataText.textContent = "SCANNING...";
-                this.els.wrapper.classList.add('status-scanning');
+                this.els.scope.classList.add('status-scanning');
                 this.els.indicator.classList.add('scanning');
             } else if (state === 'not_found') {
-                this.els.refreshBtn.classList.remove('uese-spin');
+                this.els.refreshBtn.classList.remove('xiv-spin');
                 this.els.dataText.textContent = "NOT FOUND";
-                this.els.wrapper.classList.add('status-red');
+                this.els.scope.classList.add('status-red');
             } else if (state === 'found') {
-                this.els.refreshBtn.classList.remove('uese-spin');
+                this.els.refreshBtn.classList.remove('xiv-spin');
                 const tVal = Utils.parseNum(tickets);
                 const rVal = Utils.parseNum(revenue);
 
                 let statusText = "";
                 if (tVal === 0 && rVal === 0) {
-                    this.els.wrapper.classList.add('status-red');
+                    this.els.scope.classList.add('status-red');
                     statusText = "NO SALES";
                 } else if (tVal > 0 && rVal === 0) {
-                    this.els.wrapper.classList.add('status-yellow');
+                    this.els.scope.classList.add('status-yellow');
                     statusText = "FREE TICKETS";
                 } else {
-                    this.els.wrapper.classList.add('status-green');
+                    this.els.scope.classList.add('status-green');
                     statusText = "WITH SALES";
                 }
 
@@ -787,19 +945,24 @@
         showToast(message, type = 'success') {
             this.ensureInDOM();
             const iconColor = type === 'success' ? 'rgba(var(--status-rgb-green), 1)' : 'rgba(var(--status-rgb-red), 1)';
-            const iconPath = type === 'success'
-                ? "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                : "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
+            const iconPath = type === 'success' ? CONFIG.ICONS.SUCCESS : CONFIG.ICONS.ERROR;
 
             this.els.toastIcon.setAttribute('stroke', iconColor);
             this.els.toastIcon.querySelector('path').setAttribute('d', iconPath);
             this.els.toastText.textContent = message;
+            this.els.toast.style.setProperty('border-left', `3px solid ${iconColor}`, 'important');
 
-            this.els.toast.style.borderLeft = `3px solid ${iconColor}`;
-            this.els.toast.classList.add('uese-show');
+            // Force reflow to reset CSS animation state on spam clicks
+            this.els.toast.classList.remove('xiv-show');
+            void this.els.toast.offsetWidth;
+            this.els.toast.classList.add('xiv-show');
+
+            AudioNotifier.play(type);
 
             clearTimeout(this.toastTimer);
-            this.toastTimer = setTimeout(() => this.els.toast.classList.remove('uese-show'), 3000);
+            this.toastTimer = setTimeout(() => {
+                if (this.els.toast) this.els.toast.classList.remove('xiv-show');
+            }, CONFIG.TIMING.TOAST_DURATION_MS);
         }
     };
 
@@ -814,19 +977,18 @@
             let data = State.cachedData;
 
             try {
-                if (!data) data = State.activeModule.extract();
+                if (!data) data = State.activeModule.extract(State.observedRoot || document);
                 const url = window.location.href;
 
-                let fourthCol = '0';
                 const tVal = Utils.parseNum(data.tickets);
                 const rVal = Utils.parseNum(data.revenue);
-                if (data.freeTickets !== undefined) fourthCol = data.freeTickets;
-                else if (tVal > 0 && rVal === 0) fourthCol = data.tickets;
-                else if (tVal > 0 && rVal > 0) fourthCol = CONFIG.DEFAULTS.TEXT_CHECK_FREE;
+
+                const fourthCol = data.freeTickets ?? (tVal > 0 ? (rVal === 0 ? data.tickets : CONFIG.DEFAULTS.TEXT_CHECK_FREE) : '0');
 
                 const rawString = `${url}\t${data.tickets}\t${data.revenue}\t${fourthCol}`;
                 await this.performClipboardWrite(rawString);
-                UI.showToast(`Copied! ${data.tickets} tix - ${data.revenue}`, 'success');
+
+                UI.showToast(`Copied! ${data.tickets} tickets - ${data.revenue}`, 'success');
                 UI.updateStatus('found', data.tickets, data.revenue);
             } catch (err) {
                 Logger.error("Extractor", "Extraction failed", err);
@@ -903,7 +1065,7 @@
             if (State.hasFetchedData) return;
 
             clearTimeout(State.scanTimer);
-            State.scanTimer = setTimeout(() => this.scanPage(), CONFIG.DEBOUNCE_MS);
+            State.scanTimer = setTimeout(() => this.scanPage(), CONFIG.TIMING.DEBOUNCE_MS);
         },
 
         startPolling() {
@@ -914,14 +1076,14 @@
 
         schedulePoll() {
             if (State.hasFetchedData) return;
-            if (State.pollCount >= CONFIG.POLL_MAX_ATTEMPTS) {
+            if (State.pollCount >= CONFIG.TIMING.POLL_MAX_ATTEMPTS) {
                 Logger.warn("Observer", "Poll limit reached. Data not found.");
                 UI.updateStatus('not_found');
                 return;
             }
 
             State.pollCount++;
-            const delay = Math.min(CONFIG.POLL_BASE_DELAY_MS * Math.pow(CONFIG.POLL_MULTIPLIER, State.pollCount), 10000);
+            const delay = Math.min(CONFIG.TIMING.POLL_BASE_DELAY_MS * Math.pow(CONFIG.TIMING.POLL_MULTIPLIER, State.pollCount), 10000);
 
             State.pollTimer = setTimeout(() => {
                 if (!State.hasFetchedData) {
@@ -932,8 +1094,10 @@
         },
 
         scanPage() {
+            const root = State.observedRoot || document;
+
             if (!State.activeModule) {
-                State.activeModule = siteModules.find(mod => State.currentUrl.includes(mod.domain) && mod.check());
+                State.activeModule = CONFIG.SITES.find(mod => State.currentUrl.includes(mod.domain) && mod.check(root));
                 if (State.activeModule) {
                     if (State.activeModule.theme) State.themeConfig = State.activeModule.theme;
                     this.updateObservationRoot();
@@ -944,7 +1108,7 @@
 
             if (State.activeModule) {
                 try {
-                    const data = State.activeModule.extract();
+                    const data = State.activeModule.extract(State.observedRoot || document);
                     if (data.tickets !== '' || data.revenue !== '') {
                         State.cachedData = data;
                         State.hasFetchedData = true;
@@ -1006,7 +1170,7 @@
 
     const App = {
         init() {
-            Logger.log("Bootstrap", `Initializing Version ${GM_info?.script?.version || '7.7'}`);
+            Logger.log("Bootstrap", `Initializing Version ${CONFIG.VERSION}`);
             UI.init();
             Router.init();
             Observer.start();
