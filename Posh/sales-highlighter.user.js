@@ -2,7 +2,7 @@
 // @name         [Posh] Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://posh.vip/favicon.ico
-// @version      6.3
+// @version      6.4
 // @description  Highlights active ticket sales, injects venue names, provides tab-isolated multi-filter controls, and summarizes sales with timeline badges.
 // @author       Xiv
 // @match        *://*.posh.vip/*
@@ -109,7 +109,11 @@
         // Venue Dictionary (Name -> Array of address strings)
         VENUES: {
             "Avenida": ["1 Pennsylvania Plaza, New York, NY 10119"],
-            "Bar 13": ["121 University Place, New York, NY 10003"],
+            "Bar 13": [
+                "121 University Place, New York, NY 10003",
+                "121 University Pl, New York, NY 10003",
+                "121 University Pl, New York, NY 10003, EE. UU."
+            ],
             "Brooklyn Warehouse": ["650 Sackett St, Brooklyn, NY 11217"],
             "Chocolate Factory": ["70 Scott Ave, Brooklyn, NY 11237"],
             "Club Lambda": ["1031 Grand St, Brooklyn, NY 11211"],
@@ -127,7 +131,10 @@
             "HK Hall": ["605 W 48th St, New York, NY 10036"],
             "La Canchita": ["6 Delay St, Danbury, CT 06810"],
             "Lost in Paradise": ["11-01 43rd Ave, Long Island City, NY 11101"],
-            "Mehanata": ["113 Ludlow St, New York, NY 10002"],
+            "Mehanata": [
+                "113 Ludlow St, New York, NY 10002",
+                "113 Ludlow St, New York, NY 10002, EE. UU."
+            ],
             "Nexo": ["29 W 36th St., New York, NY 10018"],
             "Pa'l Karajo Lounge": ["62-17 Northern Blvd, Flushing, NY 11377"],
             "Park Slope Warehouse": ["153 26th St, Brooklyn, NY 11232"],
@@ -1030,7 +1037,7 @@
                 if (!textSpan) return;
 
                 let hasSales = false;
-                const match = textSpan.textContent.trim().match(/^([\d,]+)\s+of\s+/i);
+                const match = textSpan.textContent.trim().match(/^([\d,]+)/);
                 if (match && match[1]) {
                     const soldCount = parseInt(match[1].replace(/,/g, ''), 10);
                     if (!isNaN(soldCount) && soldCount > 0) hasSales = true;
