@@ -145,7 +145,10 @@
             "Silver Lining": ["145 Bowery, New York, NY 10002"],
             "Superior Ingredients": ["74 Wythe Ave, Brooklyn, NY 11249"],
             "The Meadows": ["17 Meadow St, Brooklyn, NY 11206"],
-            "The Rose": ["160 West 25th Street, New York, NY 10001"],
+            "The Rose": [
+                "160 West 25th Street, New York, NY 10001",
+                "160 W 25th St, New York, NY 10001"
+            ],
             "The Vault": ["45-06 Pearson St, Long Island City, NY 11101"],
             "Treadwell": ["1125 1st Ave, New York, NY 10065"],
             "V14": ["2100 14th St NW, Washington, DC 20009"],
