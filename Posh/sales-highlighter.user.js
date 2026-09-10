@@ -2,7 +2,7 @@
 // @name         [Posh] Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://posh.vip/favicon.ico
-// @version      6.2
+// @version      6.3
 // @description  Highlights active ticket sales, injects venue names, provides tab-isolated multi-filter controls, and summarizes sales with timeline badges.
 // @author       Xiv
 // @match        *://*.posh.vip/*
