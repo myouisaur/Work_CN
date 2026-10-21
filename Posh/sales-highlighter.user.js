@@ -2,7 +2,7 @@
 // @name         [Posh] Sales Highlighter
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         https://posh.vip/favicon.ico
-// @version      6.4
+// @version      6.5
 // @description  Highlights active ticket sales, injects venue names, provides tab-isolated multi-filter controls, and summarizes sales with timeline badges.
 // @author       Xiv
 // @match        *://*.posh.vip/*
@@ -131,6 +131,7 @@
             "HK Hall": ["605 W 48th St, New York, NY 10036"],
             "La Canchita": ["6 Delay St, Danbury, CT 06810"],
             "Lost in Paradise": ["11-01 43rd Ave, Long Island City, NY 11101"],
+            "Mandala Nightclub": ["246 3rd St, Passaic, NJ 07055"],
             "Mehanata": [
                 "113 Ludlow St, New York, NY 10002",
                 "113 Ludlow St, New York, NY 10002, EE. UU."
