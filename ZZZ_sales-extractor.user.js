@@ -2,7 +2,7 @@
 // @name         [Multi-Site] Sales Extractor
 // @namespace    https://github.com/myouisaur/Work_CN
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMTBiOTgxIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTAiLz48cGF0aCBkPSJNMTYgOGgtNmEyIDIgMCAxIDAgMCA0aDRhMiAyIDAgMSAxIDAgNEg4Ii8+PHBhdGggZD0iTTEyIDE4VjYiLz48L3N2Zz4=
-// @version      8.2
+// @version      8.4
 // @description  Extracts and displays ticket sales and revenue metrics directly within supported event dashboards.
 // @author       Xiv
 // @match        *://*.eventbrite.com/*
@@ -33,7 +33,7 @@
     // ============================================================================
 
     const CONFIG = {
-        VERSION: '7.12',
+        VERSION: '8.4',
         DEBUG: false,
 
         TIMING: {
@@ -59,6 +59,14 @@
             TEXT_SOLD: 'Tickets Sold',
             TEXT_NET: 'Net Sales',
             TEXT_CHECK_FREE: 'check free tix'
+        },
+
+        // Tickeri label text (matched case-insensitively on leaf elements)
+        TICKERI_LABELS: {
+            TICKETS: 'tickets sold',
+            REVENUE: 'online revenue',
+            LEGACY_TICKETS: 'ticket inventory',
+            LEGACY_REVENUE: 'total revenue'
         },
 
         ICONS: {
@@ -237,6 +245,52 @@
     // 3. SITE MODULES (Extraction Logic & Theme)
     // ============================================================================
 
+    // Tickeri: values sit in the sibling right after a leaf label element.
+    // e.g. <span>Tickets sold</span><span>4<span> of 500</span></span> -> "4"
+    const TickeriParser = {
+        CURRENCY_RE: /[$£€]\s*[\d,.]+/,
+
+        findLabel(root, text) {
+            const needle = text.toLowerCase();
+            return Array.from(root.querySelectorAll('span, div, p, dt'))
+                .find(el => el.children.length === 0 && el.textContent.trim().toLowerCase() === needle) || null;
+        },
+
+        // Own text nodes only, so nested "of 500" is excluded
+        ownText(el) {
+            return Array.from(el.childNodes)
+                .filter(n => n.nodeType === Node.TEXT_NODE)
+                .map(n => n.textContent)
+                .join('')
+                .trim();
+        },
+
+        readTickets(root, labelText) {
+            const label = this.findLabel(root, labelText);
+            if (!label) return null;
+
+            const sibling = label.nextElementSibling;
+            const fromSibling = sibling && (this.ownText(sibling) || sibling.textContent).match(/\d[\d,]*/);
+            if (fromSibling) return fromSibling[0];
+
+            // Fallback: first number in the parent once the label is removed
+            const parentText = label.parentElement?.textContent.replace(label.textContent, '') || '';
+            const fromParent = parentText.match(/\d[\d,]*/);
+            return fromParent ? fromParent[0] : null;
+        },
+
+        readRevenue(root, labelText) {
+            const label = this.findLabel(root, labelText);
+            if (!label) return null;
+
+            const fromSibling = label.nextElementSibling?.textContent.match(this.CURRENCY_RE);
+            if (fromSibling) return fromSibling[0].trim();
+
+            const fromParent = label.parentElement?.textContent.match(this.CURRENCY_RE);
+            return fromParent ? fromParent[0].trim() : null;
+        }
+    };
+
     CONFIG.SITES = [
         {
             name: 'Eventbrite',
@@ -292,11 +346,11 @@
                         if (!labelEl) return;
 
                         const labelText = labelEl.textContent.trim().toLowerCase();
-                        const valueContainer = card.querySelector('span.text-xl > span');
+                        const valueContainer = card.querySelector('span.text-xl > span') || card.querySelector('span.text-xl');
 
                         if (!valueContainer) return;
 
-                        if (labelText.includes('net tickets sold') || labelText.includes('gross tickets sold')) {
+                        if (labelText.includes('net tickets sold') || labelText.includes('gross tickets sold') || labelText.includes('rsvp')) {
                             ticketsSold = valueContainer.textContent.trim();
                         } else if (labelText.includes('net revenue') || labelText.includes('gross revenue')) {
                             totalRevenue = valueContainer.textContent.trim();
@@ -385,33 +439,25 @@
             domain: 'tickeri.com',
             rootSelector: 'body',
             theme: { accent: '#EB0045', accentSec: '#EB0045' },
-            check: (root) => window.location.pathname.includes('/event/') && document.body.textContent.includes('Ticket Inventory'),
+            check: (root) => {
+                const L = CONFIG.TICKERI_LABELS;
+                return !!(TickeriParser.findLabel(root, L.TICKETS) && TickeriParser.findLabel(root, L.REVENUE))
+                    || !!(TickeriParser.findLabel(root, L.LEGACY_TICKETS));
+            },
             extract: (root) => {
-                let tickets = CONFIG.DEFAULTS.TICKETS, revenue = CONFIG.DEFAULTS.REVENUE;
+                const L = CONFIG.TICKERI_LABELS;
+                const tickets = TickeriParser.readTickets(root, L.TICKETS)
+                    ?? TickeriParser.readTickets(root, L.LEGACY_TICKETS);
+                const revenue = TickeriParser.readRevenue(root, L.REVENUE)
+                    ?? TickeriParser.readRevenue(root, L.LEGACY_REVENUE);
 
-                const elements = Array.from(root.querySelectorAll('span, div, p')).filter(el => el.children.length === 0);
+                if (tickets === null) Logger.warn('Tickeri', 'Could not find the ticket count. The site layout may have changed.');
+                if (revenue === null) Logger.warn('Tickeri', 'Could not find the revenue amount. The site layout may have changed.');
 
-                const tLabel = elements.find(s => s.textContent.includes('Ticket Inventory'));
-                if (tLabel) {
-                    if (tLabel.nextElementSibling) {
-                        tickets = tLabel.nextElementSibling.textContent.trim().split('/')[0].trim();
-                    } else if (tLabel.parentElement) {
-                        const match = tLabel.parentElement.textContent.replace(tLabel.textContent, '').match(/(\d+)/);
-                        if (match) tickets = match[1];
-                    }
-                }
-
-                const rLabel = elements.find(s => s.textContent.includes('Total revenue'));
-                if (rLabel) {
-                    if (rLabel.nextElementSibling) {
-                        revenue = rLabel.nextElementSibling.textContent.trim();
-                    } else if (rLabel.parentElement) {
-                        const match = rLabel.parentElement.textContent.match(/[$£€]\s*[\d,.]+/);
-                        if (match) revenue = match[0];
-                    }
-                }
-
-                return { tickets, revenue };
+                return {
+                    tickets: tickets ?? CONFIG.DEFAULTS.TICKETS,
+                    revenue: revenue ?? CONFIG.DEFAULTS.REVENUE
+                };
             }
         }
     ];
